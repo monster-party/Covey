@@ -77,7 +77,7 @@ async function main() {
     delete env.ICLOUD_APP_PASSWORD;
   }
   const args = fs.existsSync(envPath) ? [`--env-file=${envPath}`] : [];
-  args.push('server.js');
+  args.push('server-entry.js');
   process.exitCode = await runNode(args, env);
 }
 

@@ -100,12 +100,40 @@ npm run dev
 
 Open the local URL shown in the terminal (normally [http://localhost:5173](http://localhost:5173)). Front-end changes refresh the browser automatically, and changes to the server restart it automatically. If that port is already occupied, Covey selects the next available one.
 
+## Building a standalone server runtime
+
+Covey can assemble a platform-specific server artifact that does not require a
+separate Node.js or npm installation:
+
+```sh
+npm run build:server
+npm run verify:server
+```
+
+The artifact is written to `artifacts/covey-server-<platform>-<architecture>`
+and contains:
+
+- `covey-server`, the launcher;
+- `bin/node`, the private Node.js runtime;
+- `server.cjs`, the bundled server and production dependencies;
+- `public/`, the compiled Covey web client; and
+- `manifest.json`, runtime and version metadata.
+
+Artifacts are built for the platform and processor running the build. They are
+an intermediate distribution format for the planned Covey Server desktop app,
+not yet a signed end-user installer. The macOS host will pass Keychain-backed
+credentials and an Application Support data directory to this same runtime.
+Manual npm installations continue to use `.env` and `npm start`.
+
 ## How it works
 
 Covey is a small Node.js application:
 
 - `server.js` runs the Express web server and exposes the calendar API.
+- `server-entry.js` launches the server for manual npm installations.
+- `server-artifact-entry.js` prepares paths for the standalone runtime.
 - `runtime-config.js` translates environment variables into the shared server runtime contract.
+- `scripts/build-server-artifact.js` assembles the bundled server, web client, and private Node runtime.
 - `calendar-store.js` validates and persists per-install calendar configuration in `data/calendars.json`.
 - `tsdav` handles CalDAV communication with iCloud.
 - `ical.js` parses and generates iCalendar data.

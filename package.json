@@ -7,8 +7,11 @@
     "setup": "node setup.js",
     "start": "node start.js",
     "dev": "concurrently --kill-others --names server,web --prefix-colors blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
-    "dev:server": "node --watch --env-file=.env server.js",
+    "dev:server": "node --watch --env-file=.env server-entry.js",
     "dev:web": "vite --host 0.0.0.0",
+    "build:web": "vite build",
+    "build:server": "npm run build:web && node scripts/build-server-artifact.js",
+    "verify:server": "node scripts/verify-server-artifact.js",
     "test": "node --test"
   },
   "engines": {
@@ -20,7 +23,8 @@
     "tsdav": "^2.3.4"
   },
   "devDependencies": {
-    "concurrently": "^10.0.5",
+    "concurrently": "^10.0.6",
+    "esbuild": "^0.28.2",
     "vite": "^8.3.4"
   }
 }

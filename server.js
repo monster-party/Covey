@@ -14,7 +14,9 @@ import {
 import { isValidPersonImage, loadPeopleStore, savePeopleStore } from './people-store.js';
 import { resolveRuntimeOptions } from './runtime-config.js';
 
-const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+const moduleDirectory = process.env.COVEY_RUNTIME_ROOT
+  ? path.resolve(process.env.COVEY_RUNTIME_ROOT)
+  : path.dirname(fileURLToPath(import.meta.url));
 
 export function createCoveyRuntime({
   credentials,
@@ -496,23 +498,13 @@ return {
 
 export async function startCoveyFromEnvironment(env = process.env, runtimeOverrides = {}) {
   const options = resolveRuntimeOptions({ env, rootDirectory: moduleDirectory });
-  const packageVersion = JSON.parse(fs.readFileSync(path.join(moduleDirectory, 'package.json'), 'utf8')).version;
+  const metadataPath = ['package.json', 'manifest.json']
+    .map((name) => path.join(moduleDirectory, name))
+    .find((candidate) => fs.existsSync(candidate));
+  const packageVersion = env.COVEY_VERSION || (metadataPath
+    ? JSON.parse(fs.readFileSync(metadataPath, 'utf8')).version
+    : null);
   const runtime = createCoveyRuntime({ ...options, version: packageVersion, ...runtimeOverrides });
   await runtime.start({ port: options.port, host: options.host });
   return runtime;
-}
-
-const isEntrypoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isEntrypoint) {
-  startCoveyFromEnvironment().then((runtime) => {
-    const stop = async () => {
-      await runtime.stop();
-      process.exit(0);
-    };
-    process.once('SIGINT', stop);
-    process.once('SIGTERM', stop);
-  }).catch((error) => {
-    console.error(`Unable to start Covey: ${error.message}`);
-    process.exitCode = 1;
-  });
 }
