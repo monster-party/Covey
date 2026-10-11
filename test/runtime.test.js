@@ -63,6 +63,35 @@ test('starts and stops Covey from explicit runtime dependencies', async () => {
     assert.equal(status.status, 'ready');
     assert.equal(status.iCloudConnected, false);
     assert.equal(status.calendars, 1);
+    assert.equal(status.tasks, 0);
+
+    const createResponse = await fetch(`http://127.0.0.1:${address.port}/api/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ title: 'Put bins out', dueDate: '2026-10-12' }),
+    });
+    const created = (await createResponse.json()).task;
+    assert.equal(createResponse.status, 201);
+    assert.equal(created.revision, 1);
+
+    const completeResponse = await fetch(
+      `http://127.0.0.1:${address.port}/api/tasks/${created.id}/complete`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ revision: created.revision }),
+      },
+    );
+    const completed = (await completeResponse.json()).task;
+    assert.equal(completed.status, 'completed');
+
+    const staleResponse = await fetch(`http://127.0.0.1:${address.port}/api/tasks/${created.id}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ revision: created.revision, title: 'Stale change' }),
+    });
+    assert.equal(staleResponse.status, 409);
+    assert.equal((await staleResponse.json()).current.revision, completed.revision);
   } finally {
     await runtime.stop();
     fs.rmSync(dataDirectory, { recursive: true, force: true });

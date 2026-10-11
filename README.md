@@ -134,6 +134,7 @@ Covey is a small Node.js application:
 - `server-artifact-entry.js` prepares paths for the standalone runtime.
 - `runtime-config.js` translates environment variables into the shared server runtime contract.
 - `scripts/build-server-artifact.js` assembles the bundled server, web client, and private Node runtime.
+- `task-store.js` validates and atomically persists household tasks with revision-based conflict protection.
 - `calendar-store.js` validates and persists per-install calendar configuration in `data/calendars.json`.
 - `tsdav` handles CalDAV communication with iCloud.
 - `ical.js` parses and generates iCalendar data.
@@ -141,6 +142,29 @@ Covey is a small Node.js application:
 - `style.css` contains the shared stylesheet.
 
 Calendar events are read from and written to iCloud through the server. The browser does not connect directly to iCloud.
+
+## Local household tasks
+
+Covey Server is the source of truth for household tasks. Tasks are stored in
+`data/tasks.json` for manual installations, or in the data directory supplied
+by a packaged host. The versioned store uses owner-only permissions, atomic
+writes, deletion tombstones, and monotonically increasing revisions so clients
+can request incremental changes and detect stale updates.
+
+The initial task API is:
+
+- `GET /api/tasks` or `GET /api/tasks?since=<revision>`;
+- `POST /api/tasks`;
+- `PUT /api/tasks/:id`;
+- `POST /api/tasks/:id/complete`;
+- `POST /api/tasks/:id/reopen`; and
+- `DELETE /api/tasks/:id?revision=<revision>`.
+
+Task updates, completion, reopening, and deletion require the client's last
+known task revision. A stale mutation receives `409 Conflict` and the current
+task so one household device cannot silently overwrite another. Task UI and
+recurrence are intentionally deferred until the shared data contract has been
+exercised by the server and future clients.
 
 ## Privacy and local storage
 

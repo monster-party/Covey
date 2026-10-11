@@ -13,6 +13,7 @@ import {
 } from './calendar-store.js';
 import { isValidPersonImage, loadPeopleStore, savePeopleStore } from './people-store.js';
 import { resolveRuntimeOptions } from './runtime-config.js';
+import { createTaskRepository, TaskStoreError } from './task-store.js';
 
 const moduleDirectory = process.env.COVEY_RUNTIME_ROOT
   ? path.resolve(process.env.COVEY_RUNTIME_ROOT)
@@ -43,8 +44,10 @@ if (!fs.existsSync(indexPath)) {
 }
 const calendarStorePath = path.join(dataDir, 'calendars.json');
 const peopleStorePath = path.join(dataDir, 'people.json');
+const taskStorePath = path.join(dataDir, 'tasks.json');
 let calendars;
 let people;
+let tasks;
 
 try {
   calendars = loadCalendarStore(calendarStorePath, {
@@ -59,6 +62,11 @@ try {
   people = loadPeopleStore(peopleStorePath);
 } catch (error) {
   throw new Error(`Unable to load people configuration: ${error.message}`);
+}
+try {
+  tasks = createTaskRepository(taskStorePath);
+} catch (error) {
+  throw new Error(`Unable to load task configuration: ${error.message}`);
 }
 let KINDS = [...new Set(calendars.map((calendar) => calendar.type))];
 
@@ -84,6 +92,17 @@ async function connect() {
 
 const wrap = fn => async (req, res) => {
   try { await fn(req, res); } catch (e) { ctx = null; logger.error?.(e); res.status(500).json({ error: e.message }); }
+};
+const taskWrap = fn => (req, res) => {
+  try {
+    fn(req, res);
+  } catch (error) {
+    if (!(error instanceof TaskStoreError)) logger.error?.(error);
+    res.status(error instanceof TaskStoreError ? error.status : 500).json({
+      error: error.message,
+      ...(error.current ? { current: error.current } : {}),
+    });
+  }
 };
 
 // Live status line so a long-running server doesn't look hung in an
@@ -133,6 +152,7 @@ app.get('/api/status', (_req, res) => res.json({
   version,
   calendars: calendars.length,
   people: people.length,
+  tasks: tasks.list().tasks.length,
   iCloudConnected: !!ctx,
 }));
 app.get('/', (_req, res) => {
@@ -157,6 +177,50 @@ const validPersonCalendarIds = (calendarIds) =>
   calendarIds.every((id) =>
     typeof id === 'string' && calendars.some((calendar) => calendar.id === id && calendar.type === 'event'),
   );
+const validTaskAssigneeIds = (assigneeIds) =>
+  assigneeIds === undefined || (
+    Array.isArray(assigneeIds) &&
+    assigneeIds.every((id) => people.some((person) => person.id === id))
+  );
+
+app.get('/api/tasks', taskWrap((req, res) => {
+  const rawSince = req.query.since;
+  const since = rawSince === undefined ? null : Number(rawSince);
+  if (rawSince !== undefined && (!/^\d+$/.test(String(rawSince)) || !Number.isSafeInteger(since))) {
+    throw new TaskStoreError('Task revision must be a non-negative integer.');
+  }
+  res.json(tasks.list(since));
+}));
+
+app.post('/api/tasks', taskWrap((req, res) => {
+  if (!validTaskAssigneeIds(req.body?.assigneeIds)) {
+    throw new TaskStoreError('Choose valid people for this task.');
+  }
+  res.status(201).json({ task: tasks.create(req.body) });
+}));
+
+app.put('/api/tasks/:id', taskWrap((req, res) => {
+  if (!validTaskAssigneeIds(req.body?.assigneeIds)) {
+    throw new TaskStoreError('Choose valid people for this task.');
+  }
+  res.json({ task: tasks.update(req.params.id, req.body || {}) });
+}));
+
+app.post('/api/tasks/:id/complete', taskWrap((req, res) => {
+  res.json({ task: tasks.setCompleted(req.params.id, req.body?.revision, true) });
+}));
+
+app.post('/api/tasks/:id/reopen', taskWrap((req, res) => {
+  res.json({ task: tasks.setCompleted(req.params.id, req.body?.revision, false) });
+}));
+
+app.delete('/api/tasks/:id', taskWrap((req, res) => {
+  const revision = Number(req.query.revision);
+  if (!/^\d+$/.test(String(req.query.revision ?? '')) || !Number.isSafeInteger(revision)) {
+    throw new TaskStoreError('Task revision is required.');
+  }
+  res.json({ deleted: tasks.delete(req.params.id, revision) });
+}));
 
 app.get('/api/config', (_req, res) => res.json({
   kinds: KINDS,
