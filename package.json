@@ -11,6 +11,7 @@
     "dev:web": "vite --host 0.0.0.0",
     "build:web": "vite build",
     "build:server": "npm run build:web && node scripts/build-server-artifact.js",
+    "build:macos": "npm run build:server && node scripts/build-macos-app.js",
     "verify:server": "node scripts/verify-server-artifact.js",
     "test": "node --test"
   },

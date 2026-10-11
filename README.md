@@ -13,7 +13,7 @@ Covey is a minimal, family-focused calendar that brings your iCloud calendars in
 - Calendar visibility filters
 - Preferences saved in the browser
 - Minimal interface that fades secondary controls when idle
-- Time-aware Glance Mode for morning, daytime, evening, and tomorrow briefings
+- Time-aware Glance Mode with event-start animation and an optional chime
 - Optional screen wake lock for counter-mounted Android displays
 - Responsive layout for desktop and mobile devices
 - App icon, launch splash screen, and iOS Home Screen support
@@ -81,7 +81,7 @@ Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
 The server reads `.env` at startup. If you change your configuration, stop and restart Covey.
 
-Covey's server runtime can also be embedded by another host, such as the planned
+Covey's server runtime can also be embedded by another host, including the
 Covey Server macOS app. `createCoveyRuntime()` accepts credentials and explicit
 data and asset directories without reading `.env` or terminating the host
 process. Manual installations can optionally set `COVEY_DATA_DIR`,
@@ -119,11 +119,28 @@ and contains:
 - `public/`, the compiled Covey web client; and
 - `manifest.json`, runtime and version metadata.
 
-Artifacts are built for the platform and processor running the build. They are
-an intermediate distribution format for the planned Covey Server desktop app,
-not yet a signed end-user installer. The macOS host will pass Keychain-backed
-credentials and an Application Support data directory to this same runtime.
-Manual npm installations continue to use `.env` and `npm start`.
+Artifacts are built for the platform and processor running the build. Manual
+npm installations continue to use `.env` and `npm start`.
+
+## Building the macOS host
+
+On macOS with Xcode installed, build the menu bar host and its private server
+runtime with:
+
+```sh
+npm run build:macos
+```
+
+The resulting development app is written to `artifacts/Covey Server.app`. It
+starts Covey Server in the background, reports its status from the menu bar,
+opens the calendar in the default browser, and stores application data in
+`~/Library/Application Support/Covey Server`. The bundle includes its own Node.js
+runtime, so people using the app do not need Node or npm installed.
+
+This phase produces an ad-hoc signed development build rather than a notarized
+DMG. Until the setup and Keychain phase is complete, the app reads iCloud
+credentials from the environment used to launch it. A manual npm installation
+remains fully supported alongside the app.
 
 ## How it works
 
@@ -134,6 +151,8 @@ Covey is a small Node.js application:
 - `server-artifact-entry.js` prepares paths for the standalone runtime.
 - `runtime-config.js` translates environment variables into the shared server runtime contract.
 - `scripts/build-server-artifact.js` assembles the bundled server, web client, and private Node runtime.
+- `scripts/build-macos-app.js` compiles and assembles the native macOS app bundle.
+- `macos/` contains the SwiftUI menu bar host that supervises the private server process.
 - `task-store.js` validates and atomically persists household tasks with revision-based conflict protection.
 - `calendar-store.js` validates and persists per-install calendar configuration in `data/calendars.json`.
 - `tsdav` handles CalDAV communication with iCloud.

@@ -1,4 +1,5 @@
             import {
+                ambientEventKey,
                 ambientEventKind,
                 ambientLayerState,
                 ambientPeriod,
@@ -6,6 +7,7 @@
                 classifyAmbientEvents,
                 localDateKey,
                 minutesUntil,
+                newlyStartedAmbientEvent,
                 selectAmbientFocus,
             } from "./ambient.js";
             import { mountCalendarShell } from "./components/calendar-shell.js";
@@ -15,6 +17,37 @@
             mountCalendarShell(document.getElementById("app-root"));
             mountEventDialogs(document.getElementById("dialogs-root"));
             mountSettingsDialog(document.getElementById("settings-root"));
+
+            const eventStartChime = new Audio(
+                new URL("./sounds/event-start-chime.mp3", import.meta.url).href,
+            );
+            eventStartChime.preload = "auto";
+            let eventStartChimePrimed = false;
+            function playEventStartChime() {
+                eventStartChime.volume = todayEventChimeVolume / 100;
+                eventStartChime.pause();
+                eventStartChime.currentTime = 0;
+                eventStartChime.play().catch(() => {
+                    // Browsers may withhold audio until the page has received a
+                    // user gesture. The visual alert still remains available.
+                });
+            }
+            function primeEventStartChime() {
+                if (eventStartChimePrimed) return;
+                eventStartChimePrimed = true;
+                const volume = eventStartChime.volume;
+                eventStartChime.volume = 0;
+                eventStartChime.play().then(() => {
+                    eventStartChime.pause();
+                    eventStartChime.currentTime = 0;
+                    eventStartChime.volume = volume;
+                }).catch(() => {
+                    eventStartChimePrimed = false;
+                    eventStartChime.volume = volume;
+                });
+            }
+            addEventListener("pointerdown", primeEventStartChime, { once: true });
+            addEventListener("keydown", primeEventStartChime, { once: true });
 
             /*
              * Covey browser application.
@@ -259,6 +292,8 @@
                 compactWeek = false,
                 keepScreenAwake = false,
                 todayViewEnabled = true,
+                todayEventChimeEnabled = true,
+                todayEventChimeVolume = 55,
                 todayWeatherEnabled = true,
                 todayWeatherLocation = "",
                 todayTemperatureUnit = "F";
@@ -287,6 +322,12 @@
                 compactWeek = !!st.compactWeek;
                 keepScreenAwake = !!st.keepScreenAwake;
                 todayViewEnabled = st.todayViewEnabled !== false;
+                todayEventChimeEnabled = st.todayEventChimeEnabled !== false;
+                if (Number.isFinite(st.todayEventChimeVolume))
+                    todayEventChimeVolume = Math.min(
+                        100,
+                        Math.max(10, Math.round(st.todayEventChimeVolume / 5) * 5),
+                    );
                 todayWeatherEnabled = st.todayWeatherEnabled !== false;
                 if (typeof st.todayWeatherLocation === "string")
                     todayWeatherLocation = st.todayWeatherLocation.slice(0, 100);
@@ -328,6 +369,7 @@
                 detailReturnFocus = null,
                 todayOverlayOpen = null,
                 todayOverlaySignature = "",
+                ambientCurrentEventKeys = null,
                 todayReturnFocus = null,
                 todayWeatherPanelOpen = false,
                 todayWeatherTransitioning = false,
@@ -378,6 +420,8 @@
                             compactWeek,
                             keepScreenAwake,
                             todayViewEnabled,
+                            todayEventChimeEnabled,
+                            todayEventChimeVolume,
                             todayWeatherEnabled,
                             todayWeatherLocation,
                             todayTemperatureUnit,
@@ -784,6 +828,18 @@
             }
             function renderTodaySettings() {
                 $("today-enabled").checked = todayViewEnabled;
+                $("today-event-chime").checked = todayEventChimeEnabled;
+                $("today-event-chime").disabled = !todayViewEnabled;
+                $("today-chime-volume").value = todayEventChimeVolume;
+                $("today-chime-volume-value").textContent = `${todayEventChimeVolume}%`;
+                $("today-chime-volume").disabled =
+                    !todayViewEnabled || !todayEventChimeEnabled;
+                $("today-chime-preview").disabled =
+                    !todayViewEnabled || !todayEventChimeEnabled;
+                $("today-chime-controls").setAttribute(
+                    "aria-disabled",
+                    String(!todayViewEnabled || !todayEventChimeEnabled),
+                );
                 $("today-preview").disabled = !todayViewEnabled;
                 document.querySelectorAll("[data-ambient-preview]").forEach((button) => {
                     button.disabled = !todayViewEnabled;
@@ -931,6 +987,7 @@
                     key: date + ":" + (preview ? "preview" : slot),
                 };
                 todayOverlaySignature = "";
+                ambientCurrentEventKeys = null;
                 renderTodayOverlay(true);
                 $("today-overlay-close").focus();
             }
@@ -980,6 +1037,7 @@
                 todayWeatherTransitionTimer = null;
                 todayWeatherTransitioning = false;
                 todayOverlayOpen = null;
+                ambientCurrentEventKeys = null;
                 todayWeatherPanelOpen = false;
                 todayOverlaySignature = "";
                 renderTodayOverlay(true);
@@ -1196,6 +1254,15 @@
                     [...todayEvents, ...tomorrowEvents],
                     now,
                 );
+                const startedEvent = !active.preview && !todayWeatherPanelOpen
+                    ? newlyStartedAmbientEvent(
+                        ambientModel.current,
+                        ambientCurrentEventKeys,
+                    )
+                    : null;
+                ambientCurrentEventKeys = new Set(
+                    ambientModel.current.map(ambientEventKey),
+                );
                 const remainingEvents = [
                     ...ambientModel.allDay,
                     ...ambientModel.current,
@@ -1353,6 +1420,8 @@
                 const glanceMain = el("div", "ambient-glance-main");
                 const focusEvent = selectAmbientFocus(ambientModel, active.slot);
                 const focusPanel = el("section", "ambient-next-panel");
+                if (startedEvent && focusEvent === startedEvent)
+                    focusPanel.classList.add("is-starting");
                 focusPanel.setAttribute("aria-labelledby", "ambient-next-title");
                 const focusKicker = el("div", "ambient-next-kicker");
                 focusKicker.append(el("span", "ambient-pulse"));
@@ -1381,6 +1450,16 @@
                         : "Nothing else is scheduled.",
                 );
                 focusPanel.append(focusKicker, focusTitle, focusTime);
+                if (startedEvent) {
+                    const announcement = el(
+                        "p",
+                        "sr-only",
+                        `Starting now: ${startedEvent.t || "Calendar event"}`,
+                    );
+                    announcement.setAttribute("role", "status");
+                    announcement.setAttribute("aria-live", "polite");
+                    focusPanel.append(announcement);
+                }
                 if (focusEvent) {
                     const kind = ambientEventKind(focusEvent);
                     const metadata = el("div", "ambient-next-meta");
@@ -1590,6 +1669,8 @@
                 page.append(content, weatherView);
                 overlay.append(page);
                 todayOverlaySignature = signature;
+                if (startedEvent && todayEventChimeEnabled)
+                    playEventStartChime();
                 if (focusedId) overlay.querySelector("#" + focusedId)?.focus();
                 if (
                     todayWeatherEnabled &&
@@ -3464,6 +3545,17 @@
                 if (!todayViewEnabled) closeTodayOverlay(false);
                 else checkTodayView();
             };
+            $("today-event-chime").onchange = (event) => {
+                todayEventChimeEnabled = event.target.checked;
+                saveSet();
+                renderTodaySettings();
+            };
+            $("today-chime-volume").oninput = (event) => {
+                todayEventChimeVolume = Number(event.target.value);
+                $("today-chime-volume-value").textContent = `${todayEventChimeVolume}%`;
+            };
+            $("today-chime-volume").onchange = () => saveSet();
+            $("today-chime-preview").onclick = playEventStartChime;
             $("today-preview").onclick = () => {
                 openTodayOverlay(ambientPeriod(new Date()), true);
             };

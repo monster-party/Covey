@@ -4,12 +4,14 @@ import test from "node:test";
 import {
     AMBIENT_THEME_NAMES,
     ambientEventKind,
+    ambientEventKey,
     ambientLayerState,
     ambientPeriod,
     ambientWeatherState,
     classifyAmbientEvents,
     localDateKey,
     minutesUntil,
+    newlyStartedAmbientEvent,
     selectAmbientFocus,
 } from "../ambient.js";
 
@@ -67,6 +69,23 @@ test("handles midnight and reports minutes until the next event", () => {
     assert.equal(localDateKey(nextDay), "2026-10-08");
     assert.equal(minutesUntil(event("Late snack", "2026-10-07", "23:55"), now), 5);
     assert.equal(minutesUntil(event("Breakfast", "2026-10-08", "07:00"), now), null);
+});
+
+test("detects an event that starts while Glance is already open", () => {
+    const school = event("School", "2026-10-07", "08:30", "15:00");
+    const practice = event("Practice", "2026-10-07", "17:00", "18:00");
+    assert.equal(newlyStartedAmbientEvent([school], null), null);
+    assert.equal(
+        newlyStartedAmbientEvent([school], new Set([ambientEventKey(school)])),
+        null,
+    );
+    assert.equal(
+        newlyStartedAmbientEvent(
+            [school, practice],
+            new Set([ambientEventKey(school)]),
+        ),
+        practice,
+    );
 });
 
 test("prioritizes current, upcoming, all-day, and tomorrow events for Glance", () => {

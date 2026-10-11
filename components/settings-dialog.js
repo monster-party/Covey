@@ -221,6 +221,24 @@ export function mountSettingsDialog(root) {
                                 <p id="wake-lock-status" role="alert" class="settings-group-message text-xs text-mute empty:hidden"></p>
                             </div>
                         </section>
+                        <section class="mt-7" aria-labelledby="ambient-sound-heading">
+                            <h3 id="ambient-sound-heading" class="settings-section-title">Sound</h3>
+                            <div class="settings-group mt-3">
+                                <label class="settings-setting-row">
+                                    <span class="settings-setting-copy">
+                                        <span class="settings-setting-label">Event start chime</span>
+                                        <span class="settings-setting-description">Play a gentle alert when an event begins in Glance.</span>
+                                    </span>
+                                    <input id="today-event-chime" type="checkbox" role="switch" class="settings-toggle-input" />
+                                </label>
+                                <div id="today-chime-controls" class="settings-group-fields settings-sound-controls">
+                                    <label for="today-chime-volume" class="settings-setting-label">Volume</label>
+                                    <input id="today-chime-volume" type="range" min="10" max="100" step="5" aria-describedby="today-chime-volume-value" />
+                                    <output id="today-chime-volume-value" for="today-chime-volume">55%</output>
+                                    <button id="today-chime-preview" type="button" class="settings-button settings-button-secondary">Play sound</button>
+                                </div>
+                            </div>
+                        </section>
                         <section class="mt-7" aria-labelledby="ambient-weather-heading">
                             <h3 id="ambient-weather-heading" class="settings-section-title">Weather</h3>
                             <div class="settings-group mt-3">

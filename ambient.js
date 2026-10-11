@@ -81,6 +81,17 @@ export function minutesUntil(event, now) {
     return start - (now.getHours() * 60 + now.getMinutes());
 }
 
+export function ambientEventKey(event) {
+    return [event?.url, event?.id, event?.d, event?.tm, event?.t]
+        .filter(Boolean)
+        .join("|");
+}
+
+export function newlyStartedAmbientEvent(currentEvents, previousKeys) {
+    if (!(previousKeys instanceof Set)) return null;
+    return currentEvents.find((event) => !previousKeys.has(ambientEventKey(event))) || null;
+}
+
 export const AMBIENT_THEME_NAMES = [
     "sand",
     "ocean",
@@ -100,7 +111,7 @@ export function ambientEventKind(event) {
 
 export function selectAmbientFocus(model, slot = "day") {
     if (slot === "night") return model.tomorrowEvents?.[0] || null;
-    return model.current?.[0] || model.next || model.allDay?.[0] || null;
+    return model.current?.at(-1) || model.next || model.allDay?.[0] || null;
 }
 
 export function ambientWeatherState({ enabled, location, status, weather }) {
