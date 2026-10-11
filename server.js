@@ -12,55 +12,58 @@ import {
   saveCalendarStore,
 } from './calendar-store.js';
 import { isValidPersonImage, loadPeopleStore, savePeopleStore } from './people-store.js';
+import { resolveRuntimeOptions } from './runtime-config.js';
 
+const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-const {
-  ICLOUD_EMAIL,
-  ICLOUD_APP_PASSWORD,
-  CALENDAR_NAME,
-  REMINDERS_CALENDAR,
-  DINNER_CALENDAR,
-  COVEY_DATA_DIR,
-  PORT = 3000,
-} = process.env;
-if (!ICLOUD_EMAIL || !ICLOUD_APP_PASSWORD) {
-  console.error('Missing ICLOUD_EMAIL or ICLOUD_APP_PASSWORD. Copy .env_sample to .env and fill it in.');
-  process.exit(1);
+export function createCoveyRuntime({
+  credentials,
+  dataDirectory,
+  assetsDirectory = moduleDirectory,
+  legacyCalendars = {},
+  davClientFactory = createDAVClient,
+  version = null,
+  logger = console,
+  statusOutput = process.stdout,
+} = {}) {
+if (!credentials?.username || !credentials?.password) {
+  throw new Error('Covey runtime requires iCloud credentials.');
 }
+if (!dataDirectory) throw new Error('Covey runtime requires a data directory.');
 
-const dataDir = COVEY_DATA_DIR ? path.resolve(COVEY_DATA_DIR) : path.join(here, 'data');
+const ICLOUD_EMAIL = credentials.username;
+const ICLOUD_APP_PASSWORD = credentials.password;
+const here = path.resolve(assetsDirectory);
+const dataDir = path.resolve(dataDirectory);
+const indexPath = path.join(here, 'index.html');
+if (!fs.existsSync(indexPath)) {
+  throw new Error(`Covey web assets are missing index.html at ${indexPath}.`);
+}
 const calendarStorePath = path.join(dataDir, 'calendars.json');
 const peopleStorePath = path.join(dataDir, 'people.json');
 let calendars;
 let people;
 
-console.log('A: env ok, loading calendars from', calendarStorePath);
 try {
   calendars = loadCalendarStore(calendarStorePath, {
-    CALENDAR_NAME,
-    REMINDERS_CALENDAR,
-    DINNER_CALENDAR,
+    CALENDAR_NAME: legacyCalendars.CALENDAR_NAME,
+    REMINDERS_CALENDAR: legacyCalendars.REMINDERS_CALENDAR,
+    DINNER_CALENDAR: legacyCalendars.DINNER_CALENDAR,
   });
-  console.log('B: calendars loaded');
-
 } catch (error) {
-  console.error(`Unable to load calendar configuration: ${error.message}`);
-  process.exit(1);
+  throw new Error(`Unable to load calendar configuration: ${error.message}`);
 }
 try {
   people = loadPeopleStore(peopleStorePath);
-  console.log('C: people loaded');
 } catch (error) {
-  console.error(`Unable to load people configuration: ${error.message}`);
-  process.exit(1);
+  throw new Error(`Unable to load people configuration: ${error.message}`);
 }
 let KINDS = [...new Set(calendars.map((calendar) => calendar.type))];
 
 let ctx = null; // cached iCloud connection
 async function connect() {
   if (ctx) return ctx;
-  const client = await createDAVClient({
+  const client = await davClientFactory({
     serverUrl: 'https://caldav.icloud.com',
     credentials: { username: ICLOUD_EMAIL, password: ICLOUD_APP_PASSWORD },
     authMethod: 'Basic',
@@ -78,7 +81,7 @@ async function connect() {
 }
 
 const wrap = fn => async (req, res) => {
-  try { await fn(req, res); } catch (e) { ctx = null; console.error(e); res.status(500).json({ error: e.message }); }
+  try { await fn(req, res); } catch (e) { ctx = null; logger.error?.(e); res.status(500).json({ error: e.message }); }
 };
 
 // Live status line so a long-running server doesn't look hung in an
@@ -87,9 +90,9 @@ const wrap = fn => async (req, res) => {
 // stdout isn't a TTY (piped to a file, process manager, etc.) so logs stay clean.
 let reqCount = 0;
 function startStatusLine(url) {
-  if (!process.stdout.isTTY) {
-    console.log(`Covey is running on ${url}`);
-    return;
+  if (!statusOutput?.isTTY) {
+    logger.info?.(`Covey is running on ${url}`);
+    return () => {};
   }
   const frames = ['\u280b', '\u2819', '\u2839', '\u2838', '\u283c', '\u2834', '\u2826', '\u2827', '\u2807', '\u280f'];
   const started = Date.now();
@@ -100,21 +103,38 @@ function startStatusLine(url) {
     const secs = String(elapsed % 60).padStart(2, '0');
     const spinner = frames[frame = (frame + 1) % frames.length];
     const requests = `${reqCount} request${reqCount === 1 ? '' : 's'} served`;
-    process.stdout.write(`\r\x1b[2K\x1b[36m${spinner}\x1b[0m Covey is running on \x1b[1m${url}\x1b[0m  \u00b7  up ${mins}:${secs}  \u00b7  ${requests}`);
+    statusOutput.write(`\r\x1b[2K\x1b[36m${spinner}\x1b[0m Covey is running on \x1b[1m${url}\x1b[0m  \u00b7  up ${mins}:${secs}  \u00b7  ${requests}`);
   };
   render();
   const timer = setInterval(render, 120);
   timer.unref();
-  const cleanup = () => { process.stdout.write('\n'); process.exit(0); };
-  process.once('SIGINT', cleanup);
-  process.once('SIGTERM', cleanup);
+  return () => {
+    clearInterval(timer);
+    statusOutput.write('\r\x1b[2K');
+  };
 }
 
 const app = express();
+const startedAt = new Date();
 app.use((_req, _res, next) => { reqCount++; next(); });
 app.use(express.json({ limit: '1mb' }));
+app.get('/api/health', (_req, res) => res.json({
+  status: 'ok',
+  service: 'covey-server',
+  version,
+  startedAt: startedAt.toISOString(),
+  uptimeSeconds: Math.floor((Date.now() - startedAt.getTime()) / 1000),
+}));
+app.get('/api/status', (_req, res) => res.json({
+  status: ctx ? 'connected' : 'ready',
+  service: 'covey-server',
+  version,
+  calendars: calendars.length,
+  people: people.length,
+  iCloudConnected: !!ctx,
+}));
 app.get('/', (_req, res) => {
-  const page = fs.readFileSync(path.join(here, 'index.html'), 'utf8');
+  const page = fs.readFileSync(indexPath, 'utf8');
   res.type('html').send(page.replace('<!--SERVER-->', '<script>window.GAGGLE_SERVER = true</script>'));
 });
 
@@ -181,7 +201,7 @@ app.post('/api/config/people', (req, res) => {
     people = savePeopleStore(peopleStorePath, [...people, { id, name: trimmedName, avatar, image, calendarIds }]);
     res.status(201).json({ people: publicPeople(), person: people.find((person) => person.id === id) });
   } catch (error) {
-    console.error('Unable to save person:', error);
+    logger.error?.('Unable to save person:', error);
     res.status(500).json({ error: `Could not save person: ${error.message}` });
   }
 });
@@ -224,7 +244,7 @@ app.put('/api/config/people/:id', (req, res) => {
     ));
     res.json({ people: publicPeople(), person: people.find((entry) => entry.id === person.id) });
   } catch (error) {
-    console.error('Unable to update person:', error);
+    logger.error?.('Unable to update person:', error);
     res.status(500).json({ error: `Could not update person: ${error.message}` });
   }
 });
@@ -262,7 +282,7 @@ app.post('/api/config/calendars', async (req, res) => {
   }
 
   try {
-    const client = ctx?.client || await createDAVClient({
+    const client = ctx?.client || await davClientFactory({
       serverUrl: 'https://caldav.icloud.com',
       credentials: { username: ICLOUD_EMAIL, password: ICLOUD_APP_PASSWORD },
       authMethod: 'Basic',
@@ -296,7 +316,7 @@ app.post('/api/config/calendars', async (req, res) => {
     ctx = null;
     res.status(201).json({ kinds: KINDS, calendars: publicCalendars(), calendar: created });
   } catch (error) {
-    console.error('Unable to add iCloud calendar:', error);
+    logger.error?.('Unable to add iCloud calendar:', error);
     res.status(502).json({ error: `Could not verify this calendar with iCloud: ${error.message}` });
   }
 });
@@ -330,14 +350,14 @@ app.delete('/api/config/calendars/:id', (req, res) => {
         try {
           people = savePeopleStore(peopleStorePath, previousPeople);
         } catch (rollbackError) {
-          console.error('Unable to restore people after calendar removal failed:', rollbackError);
+          logger.error?.('Unable to restore people after calendar removal failed:', rollbackError);
         }
       }
       if (calendars !== previousCalendars) {
         try {
           calendars = saveCalendarStore(calendarStorePath, previousCalendars);
         } catch (rollbackError) {
-          console.error('Unable to restore calendars after removal failed:', rollbackError);
+          logger.error?.('Unable to restore calendars after removal failed:', rollbackError);
         }
       }
       throw error;
@@ -346,7 +366,7 @@ app.delete('/api/config/calendars/:id', (req, res) => {
     ctx = null;
     res.json({ kinds: KINDS, calendars: publicCalendars(), people: publicPeople() });
   } catch (error) {
-    console.error('Unable to remove calendar:', error);
+    logger.error?.('Unable to remove calendar:', error);
     res.status(500).json({ error: `Could not remove calendar: ${error.message}` });
   }
 });
@@ -437,4 +457,62 @@ app.delete('/api/events', wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.listen(PORT, () => startStatusLine(`http://localhost:${PORT}`));
+let httpServer = null;
+let stopStatusLine = null;
+return {
+  app,
+  get address() { return httpServer?.address() || null; },
+  async start({ port = 3000, host } = {}) {
+    if (httpServer) throw new Error('Covey server is already running.');
+    await new Promise((resolve, reject) => {
+      const server = app.listen(port, host, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        httpServer = server;
+        const address = server.address();
+        if (!address) {
+          reject(new Error('Covey server did not receive a listening address.'));
+          return;
+        }
+        const displayHost = !host || host === '0.0.0.0' || host === '::' ? 'localhost' : host;
+        stopStatusLine = startStatusLine(`http://${displayHost}:${address.port}`);
+        resolve();
+      });
+    });
+    return this.address;
+  },
+  async stop() {
+    if (!httpServer) return;
+    const server = httpServer;
+    httpServer = null;
+    stopStatusLine?.();
+    stopStatusLine = null;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  },
+};
+}
+
+export async function startCoveyFromEnvironment(env = process.env, runtimeOverrides = {}) {
+  const options = resolveRuntimeOptions({ env, rootDirectory: moduleDirectory });
+  const packageVersion = JSON.parse(fs.readFileSync(path.join(moduleDirectory, 'package.json'), 'utf8')).version;
+  const runtime = createCoveyRuntime({ ...options, version: packageVersion, ...runtimeOverrides });
+  await runtime.start({ port: options.port, host: options.host });
+  return runtime;
+}
+
+const isEntrypoint = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isEntrypoint) {
+  startCoveyFromEnvironment().then((runtime) => {
+    const stop = async () => {
+      await runtime.stop();
+      process.exit(0);
+    };
+    process.once('SIGINT', stop);
+    process.once('SIGTERM', stop);
+  }).catch((error) => {
+    console.error(`Unable to start Covey: ${error.message}`);
+    process.exitCode = 1;
+  });
+}

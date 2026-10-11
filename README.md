@@ -81,6 +81,17 @@ Then open [http://localhost:3000](http://localhost:3000) in your browser.
 
 The server reads `.env` at startup. If you change your configuration, stop and restart Covey.
 
+Covey's server runtime can also be embedded by another host, such as the planned
+Covey Server macOS app. `createCoveyRuntime()` accepts credentials and explicit
+data and asset directories without reading `.env` or terminating the host
+process. Manual installations can optionally set `COVEY_DATA_DIR`,
+`COVEY_ASSETS_DIR`, `COVEY_HOST`, and `PORT`; the defaults preserve the existing
+`npm start` behavior.
+
+The server exposes `GET /api/health` for process health and `GET /api/status`
+for non-secret runtime status. These endpoints do not contact iCloud or return
+account credentials.
+
 For development, run:
 
 ```sh
@@ -94,6 +105,7 @@ Open the local URL shown in the terminal (normally [http://localhost:5173](http:
 Covey is a small Node.js application:
 
 - `server.js` runs the Express web server and exposes the calendar API.
+- `runtime-config.js` translates environment variables into the shared server runtime contract.
 - `calendar-store.js` validates and persists per-install calendar configuration in `data/calendars.json`.
 - `tsdav` handles CalDAV communication with iCloud.
 - `ical.js` parses and generates iCalendar data.
