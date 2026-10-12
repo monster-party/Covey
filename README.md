@@ -14,6 +14,7 @@ Covey is a minimal, family-focused calendar that brings your iCloud calendars in
 - Preferences saved in the browser
 - Minimal interface that fades secondary controls when idle
 - Time-aware Glance Mode with event-start animation and an optional chime
+- Swipeable Glance, Calendar, and Tasks pages with a compact floating page control
 - Optional screen wake lock for counter-mounted Android displays
 - Responsive layout for desktop and mobile devices
 - App icon, launch splash screen, and iOS Home Screen support

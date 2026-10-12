@@ -13,6 +13,7 @@
             import { mountCalendarShell } from "./components/calendar-shell.js";
             import { mountEventDialogs } from "./components/event-dialogs.js";
             import { mountSettingsDialog } from "./components/settings-dialog.js";
+            import { groupTasks, mergeTaskResponse, selectGlanceTasks, taskDateKey } from "./tasks.js";
 
             mountCalendarShell(document.getElementById("app-root"));
             mountEventDialogs(document.getElementById("dialogs-root"));
@@ -367,10 +368,10 @@
                 sheet = false,
                 detailEvent = null,
                 detailReturnFocus = null,
+                activePage = "glance",
                 todayOverlayOpen = null,
                 todayOverlaySignature = "",
                 ambientCurrentEventKeys = null,
-                todayReturnFocus = null,
                 todayWeatherPanelOpen = false,
                 todayWeatherTransitioning = false,
                 todayWeatherTransitionTimer = null,
@@ -390,6 +391,13 @@
                 tomorrowEventsError = "",
                 setOpen = false,
                 setTab = "calendars";
+            let householdTasks = [],
+                tasksStatus = "idle",
+                tasksMessage = "",
+                tasksRequest = null,
+                taskComposerOpen = false,
+                taskAssigneeIds = new Set(),
+                taskBeingEdited = null;
             let screenWakeLock = null,
                 wakeLockMessage = "";
             cur.setDate(1);
@@ -600,6 +608,320 @@
                         String(person.name || person.n || "?").slice(0, 1).toUpperCase();
                 }
                 return avatar;
+            }
+
+            function taskPeople(task) {
+                return (task.assigneeIds || [])
+                    .map((id) => people.find((person) => person.id === id))
+                    .filter(Boolean);
+            }
+            function taskFacePile(task, compact = false) {
+                const assigned = taskPeople(task);
+                if (!assigned.length) return null;
+                const pile = el("div", compact ? "task-face-pile is-compact" : "task-face-pile");
+                const names = assigned.map((person) => person.name).join(", ");
+                pile.setAttribute("aria-label", `Assigned to ${names}`);
+                pile.title = names;
+                assigned.slice(0, 3).forEach((person) => {
+                    const avatar = avatarNode(person, compact ? 24 : 34);
+                    avatar.classList.add("task-avatar");
+                    avatar.title = person.name;
+                    pile.append(avatar);
+                });
+                if (assigned.length > 3)
+                    pile.append(el("span", "task-avatar task-avatar-more", `+${assigned.length - 3}`));
+                return pile;
+            }
+            function taskDueText(task, today = taskDateKey()) {
+                if (!task.dueDate) return task.notes || "Anytime";
+                const date = new Date(`${task.dueDate}T12:00:00`);
+                let label;
+                if (task.dueDate < today) label = "Overdue · " + date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                else if (task.dueDate === today) label = "Today";
+                else {
+                    const tomorrow = new Date();
+                    tomorrow.setHours(12, 0, 0, 0);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    label = task.dueDate === taskDateKey(tomorrow)
+                        ? "Tomorrow"
+                        : date.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+                }
+                if (task.dueTime) {
+                    const [hours, minutes] = task.dueTime.split(":").map(Number);
+                    const time = new Date();
+                    time.setHours(hours, minutes, 0, 0);
+                    label += ` · ${formatTime(time)}`;
+                }
+                return task.notes ? `${label} · ${task.notes}` : label;
+            }
+            async function fetchTasks({ announce = false } = {}) {
+                if (tasksRequest) return tasksRequest;
+                tasksStatus = householdTasks.length ? "refreshing" : "loading";
+                tasksMessage = "";
+                renderTasksPage();
+                tasksRequest = fetch("/api/tasks")
+                    .then(async (response) => {
+                        const result = await response.json().catch(() => ({}));
+                        if (!response.ok) throw new Error(result.error || "Could not load tasks.");
+                        householdTasks = Array.isArray(result.tasks) ? result.tasks : [];
+                        tasksStatus = "ready";
+                        if (announce) tasksMessage = "Tasks updated.";
+                        renderTasksPage();
+                        if (activePage === "glance") renderTodayOverlay(true);
+                    })
+                    .catch((error) => {
+                        tasksStatus = "error";
+                        tasksMessage = error.message || "Could not load tasks.";
+                        renderTasksPage();
+                    })
+                    .finally(() => { tasksRequest = null; });
+                return tasksRequest;
+            }
+            function setTaskComposerOpen(open, task = null) {
+                taskComposerOpen = open;
+                taskBeingEdited = open ? task : null;
+                const composer = $("task-composer");
+                composer.classList.toggle("hidden", !open);
+                composer.classList.toggle("flex", open);
+                $("covey-pages").inert =
+                    setOpen || sheet || !!detailEvent || taskComposerOpen;
+                if (open) {
+                    $("task-composer-form").reset();
+                    taskAssigneeIds = new Set(task?.assigneeIds || []);
+                    renderTaskAssigneeOptions();
+                    $("task-due-date").min = taskDateKey();
+                    $("task-title").value = task?.title || "";
+                    $("task-due-date").value = task?.dueDate || "";
+                    $("task-due-time").value = task?.dueTime || "";
+                    $("task-due-time").disabled = !task?.dueDate;
+                    $("task-notes").value = task?.notes || "";
+                    $("task-composer-title").textContent = task
+                        ? "Edit task"
+                        : "Add a task";
+                    $("task-create").textContent = task ? "Save changes" : "Add task";
+                    $("task-create-status").textContent = "";
+                    requestAnimationFrame(() => $("task-title").focus());
+                } else {
+                    $("addbtn").focus();
+                }
+            }
+            function renderTaskAssigneeOptions() {
+                const options = $("task-assignees");
+                options.innerHTML = "";
+                if (!people.length) {
+                    options.append(
+                        el("p", "task-assignee-empty", "No people have been added yet."),
+                    );
+                    return;
+                }
+                people.forEach((person) => {
+                    const button = el("button", "task-assignee-option");
+                    button.type = "button";
+                    button.setAttribute(
+                        "aria-pressed",
+                        String(taskAssigneeIds.has(person.id)),
+                    );
+                    button.append(
+                        avatarNode(person, 32),
+                        el("span", "", person.name),
+                    );
+                    button.onclick = () => {
+                        if (taskAssigneeIds.has(person.id))
+                            taskAssigneeIds.delete(person.id);
+                        else taskAssigneeIds.add(person.id);
+                        button.setAttribute(
+                            "aria-pressed",
+                            String(taskAssigneeIds.has(person.id)),
+                        );
+                    };
+                    options.append(button);
+                });
+            }
+            async function createTask(event) {
+                event.preventDefault();
+                const button = $("task-create");
+                if (button.disabled) return;
+                const payload = {
+                    title: $("task-title").value.trim(),
+                    dueDate: $("task-due-date").value || null,
+                    dueTime: $("task-due-time").value || null,
+                    notes: $("task-notes").value.trim(),
+                    assigneeIds: [...taskAssigneeIds],
+                };
+                const editing = taskBeingEdited;
+                if (editing) payload.revision = editing.revision;
+                if (!payload.title) return $("task-title").focus();
+                button.disabled = true;
+                button.setAttribute("aria-busy", "true");
+                $("task-create-status").textContent = editing
+                    ? "Saving changes…"
+                    : "Adding task…";
+                try {
+                    const response = await fetch(
+                        editing
+                            ? `/api/tasks/${encodeURIComponent(editing.id)}`
+                            : "/api/tasks",
+                        {
+                        method: editing ? "PUT" : "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload),
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (response.status === 409) {
+                        if (result.current) {
+                            householdTasks = mergeTaskResponse(
+                                householdTasks,
+                                result.current,
+                            );
+                            taskBeingEdited = result.current;
+                        }
+                        renderTasksPage();
+                        throw new Error(
+                            "This task changed on another device. Review it and try again.",
+                        );
+                    }
+                    if (!response.ok)
+                        throw new Error(
+                            result.error ||
+                                `Could not ${editing ? "update" : "add"} task.`,
+                        );
+                    householdTasks = mergeTaskResponse(householdTasks, result.task);
+                    tasksStatus = "ready";
+                    tasksMessage = `${result.task.title} ${editing ? "updated" : "added"}.`;
+                    renderTasksPage();
+                    setTaskComposerOpen(false);
+                } catch (error) {
+                    $("task-create-status").textContent =
+                        error.message || "Could not add task.";
+                } finally {
+                    button.disabled = false;
+                    button.removeAttribute("aria-busy");
+                }
+            }
+            async function setTaskCompleted(task, completed, button) {
+                if (button.disabled) return;
+                const previous = task;
+                const optimistic = {
+                    ...task,
+                    status: completed ? "completed" : "open",
+                    completedAt: completed ? new Date().toISOString() : null,
+                };
+                householdTasks = mergeTaskResponse(householdTasks, optimistic);
+                tasksMessage = `${task.title} ${completed ? "completed" : "reopened"}.`;
+                renderTasksPage();
+                if (activePage === "glance") renderTodayOverlay(true);
+                try {
+                    const response = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/${completed ? "complete" : "reopen"}`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ revision: task.revision }),
+                    });
+                    const result = await response.json().catch(() => ({}));
+                    if (response.status === 409) {
+                        if (result.current) householdTasks = mergeTaskResponse(householdTasks, result.current);
+                        tasksMessage = "This task changed on another device. Tasks were refreshed.";
+                        renderTasksPage();
+                        await fetchTasks();
+                        return;
+                    }
+                    if (!response.ok) throw new Error(result.error || "Could not update task.");
+                    householdTasks = mergeTaskResponse(householdTasks, result.task);
+                    renderTasksPage();
+                } catch (error) {
+                    householdTasks = mergeTaskResponse(householdTasks, previous);
+                    tasksMessage = `${error.message || "Could not update task."} Your change was undone.`;
+                    renderTasksPage();
+                }
+            }
+            function taskRow(task, completed = false) {
+                const row = el("article", `task-row${completed ? " is-done" : ""}`);
+                const check = el("button", `task-check${completed ? " is-checked" : ""}`);
+                check.type = "button";
+                check.setAttribute("aria-label", `${completed ? "Reopen" : "Complete"} ${task.title}`);
+                check.append(el("span"));
+                if (completed) check.firstElementChild.innerHTML = ic("check", 16);
+                check.onclick = (event) => {
+                    event.stopPropagation();
+                    setTaskCompleted(task, !completed, check);
+                };
+                const copy = el("div", "task-copy");
+                copy.append(el("h3", "", task.title));
+                const meta = el("p", task.dueDate && task.dueDate < taskDateKey() ? "is-overdue" : "", completed
+                    ? `Completed${task.completedAt ? " " + new Date(task.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}`
+                    : taskDueText(task));
+                copy.append(meta);
+                const edit = el("button", "task-edit-target");
+                edit.type = "button";
+                edit.setAttribute("aria-label", `Edit ${task.title}`);
+                edit.onclick = () => setTaskComposerOpen(true, task);
+                edit.append(copy);
+                const pile = taskFacePile(task);
+                if (pile) edit.append(pile);
+                row.append(check, edit);
+                return row;
+            }
+            function renderTasksPage() {
+                const page = $("tasks-page");
+                if (!page) return;
+                page.innerHTML = "";
+                const shell = el("div", "tasks-screen");
+                const header = el("header", "tasks-header");
+                const heading = el("div");
+                heading.append(
+                    el("p", "tasks-date", new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })),
+                    el("h1", "", "Tasks"),
+                );
+                const openCount = householdTasks.filter((task) => task.status !== "completed").length;
+                const summary = el("div", "tasks-summary");
+                summary.append(el("strong", "", String(openCount)), el("span", "", "left to do"));
+                header.append(heading, summary);
+                const content = el("main", "tasks-scroll");
+                content.setAttribute("aria-busy", String(tasksStatus === "loading" || tasksStatus === "refreshing"));
+                if (tasksStatus === "loading") {
+                    content.append(el("div", "tasks-state", "Loading household tasks…"));
+                } else if (tasksStatus === "error" && !householdTasks.length) {
+                    const state = el("div", "tasks-state");
+                    state.append(el("h2", "", "Tasks aren’t available"), el("p", "", tasksMessage));
+                    const retry = el("button", "tasks-retry", "Try again");
+                    retry.onclick = () => fetchTasks({ announce: true });
+                    state.append(retry);
+                    content.append(state);
+                } else {
+                    const grouped = groupTasks(householdTasks);
+                    const sections = [
+                        ["overdue", "Overdue"], ["today", "Today"],
+                        ["upcoming", "Upcoming"], ["anytime", "Anytime"],
+                    ];
+                    sections.forEach(([key, label]) => {
+                        if (!grouped[key].length) return;
+                        const section = el("section", `task-section${key === "overdue" ? " danger-section" : ""}`);
+                        const title = el("div", "task-section-heading");
+                        title.append(el("h2", "", label), el("span", "", String(grouped[key].length)));
+                        section.append(title, ...grouped[key].map((task) => taskRow(task)));
+                        content.append(section);
+                    });
+                    if (!openCount) {
+                        const empty = el("div", "tasks-empty");
+                        empty.innerHTML = `${ic("check", 28)}<h2>Everything’s taken care of</h2><p>Your household is all caught up.</p>`;
+                        content.append(empty);
+                    }
+                    if (grouped.completed.length) {
+                        const details = el("details", "tasks-completed");
+                        const summaryNode = el("summary");
+                        summaryNode.append(el("span", "", "Completed"), el("b", "", String(grouped.completed.length)));
+                        const arrow = el("span", "tasks-completed-arrow");
+                        arrow.innerHTML = ic("chevron-down", 17);
+                        summaryNode.append(arrow);
+                        const list = el("div", "tasks-completed-list");
+                        grouped.completed.forEach((task) => list.append(taskRow(task, true)));
+                        details.append(summaryNode, list);
+                        content.append(details);
+                    }
+                }
+                const status = el("output", "sr-only tasks-live", tasksMessage);
+                status.setAttribute("aria-live", "polite");
+                shell.append(header, content, status);
+                page.append(shell);
             }
 
             function renderWhoOptions() {
@@ -977,8 +1299,72 @@
                     .sort((a, b) => (a.tm || "").localeCompare(b.tm || ""));
             }
 
-            function openTodayOverlay(slot, preview = false) {
-                if (!todayOverlayOpen) todayReturnFocus = document.activeElement;
+            const COVEY_PAGES = ["glance", "calendar", "tasks"];
+            function alignPagePagination() {
+                const pagination = $("page-pagination");
+                const footer = $("today-overlay").querySelector(
+                    ".ambient-glance-footer",
+                );
+                if (!footer) return;
+                const viewport = $("covey-pages").getBoundingClientRect();
+                const footerBounds = footer.getBoundingClientRect();
+                const footerCenter = footerBounds.top + footerBounds.height / 2;
+                const bottom = Math.max(
+                    0,
+                    viewport.bottom - footerCenter - pagination.offsetHeight / 2,
+                );
+                pagination.style.bottom = `${bottom}px`;
+                const addButton = $("addbtn");
+                if (!addButton.hidden) {
+                    const addBottom = Math.max(
+                        0,
+                        viewport.bottom -
+                            footerCenter -
+                            addButton.offsetHeight / 2,
+                    );
+                    addButton.style.bottom = `${addBottom}px`;
+                }
+            }
+            function setActivePage(page, { userInitiated = false, focus = false } = {}) {
+                if (!COVEY_PAGES.includes(page)) return;
+                activePage = page;
+                const shell = $("covey-pages");
+                const track = $("covey-page-track");
+                shell.dataset.activePage = page;
+                track.classList.remove("is-dragging");
+                track.style.removeProperty("transform");
+                COVEY_PAGES.forEach((name) => {
+                    const section = $(`${name}-page`);
+                    const current = name === page;
+                    section.inert = !current;
+                    section.setAttribute("aria-hidden", String(!current));
+                    const control = document.querySelector(`[data-page="${name}"]`);
+                    if (current) control.setAttribute("aria-current", "page");
+                    else control.removeAttribute("aria-current");
+                });
+                document.body.classList.toggle("calendar-page-active", page === "calendar");
+                const addButton = $("addbtn");
+                addButton.hidden = page === "glance";
+                addButton.setAttribute(
+                    "aria-label",
+                    page === "tasks" ? "Add task" : "Add event",
+                );
+                if (userInitiated) {
+                    ambientReadyAt = Date.now() + AMBIENT_IDLE_MS;
+                    wakeChrome();
+                }
+                if (page !== "glance" && todayOverlayOpen?.preview)
+                    todayOverlayOpen.preview = false;
+                if (page === "glance") renderTodayOverlay(true);
+                else if (page === "tasks") {
+                    renderTasksPage();
+                    fetchTasks({ announce: tasksStatus === "ready" });
+                }
+                requestAnimationFrame(alignPagePagination);
+                if (focus)
+                    document.querySelector(`[data-page="${page}"]`)?.focus();
+            }
+            function openTodayOverlay(slot, preview = false, navigate = true) {
                 const date = iso(new Date());
                 todayWeatherPanelOpen = false;
                 todayOverlayOpen = {
@@ -989,7 +1375,7 @@
                 todayOverlaySignature = "";
                 ambientCurrentEventKeys = null;
                 renderTodayOverlay(true);
-                $("today-overlay-close").focus();
+                if (navigate) setActivePage("glance");
             }
             function navigateAmbientWeather(open) {
                 if (!todayOverlayOpen || todayWeatherTransitioning || open === todayWeatherPanelOpen)
@@ -1030,38 +1416,22 @@
                     todayWeatherTransitionTimer = setTimeout(finish, 380);
                 }));
             }
-            function closeTodayOverlay(dismiss = false) {
-                if (!todayOverlayOpen) return;
-                if (dismiss) ambientReadyAt = Date.now() + AMBIENT_IDLE_MS;
-                clearTimeout(todayWeatherTransitionTimer);
-                todayWeatherTransitionTimer = null;
-                todayWeatherTransitioning = false;
-                todayOverlayOpen = null;
-                ambientCurrentEventKeys = null;
-                todayWeatherPanelOpen = false;
-                todayOverlaySignature = "";
-                renderTodayOverlay(true);
-                const returnFocus = todayReturnFocus;
-                todayReturnFocus = null;
-                if (returnFocus?.isConnected) returnFocus.focus();
-            }
             function checkTodayView(now = new Date()) {
-                if (todayOverlayOpen?.preview) return;
-                const slot =
+                if (todayOverlayOpen?.preview && activePage === "glance") return;
+                const slot = ambientPeriod(now);
+                const key = localDateKey(now) + ":" + slot;
+                if (todayOverlayOpen?.key !== key)
+                    openTodayOverlay(slot, false, false);
+                else renderTodayOverlay();
+                if (
                     todayViewEnabled &&
                     Date.now() >= ambientReadyAt &&
                     !setOpen &&
                     !sheet &&
-                    !detailEvent
-                    ? ambientPeriod(now)
-                    : null;
-                const key = slot ? localDateKey(now) + ":" + slot : null;
-                if (!slot) {
-                    if (todayOverlayOpen) closeTodayOverlay(false);
-                    return;
-                }
-                if (todayOverlayOpen?.key !== key) openTodayOverlay(slot);
-                else renderTodayOverlay();
+                    !detailEvent &&
+                    activePage !== "glance"
+                )
+                    setActivePage("glance");
             }
             function formatTodayTemperature(value) {
                 if (!Number.isFinite(value)) return "—";
@@ -1214,20 +1584,8 @@
             function renderTodayOverlay(force = false) {
                 const overlay = $("today-overlay");
                 const active = todayOverlayOpen;
-                overlay.classList.toggle("hidden", !active);
-                overlay.inert = !!active && setOpen;
-                overlay.setAttribute("aria-hidden", String(!active || setOpen));
-                if (active && !setOpen && !overlay.contains(document.activeElement))
-                    overlay.focus({ preventScroll: true });
-                ["app-shell", "addbtn", "sheet", "settings", "event-detail"].forEach(
-                    (id) => {
-                        const layer = $(id);
-                        const blocked = !!active && !(id === "settings" && setOpen);
-                        layer.inert = blocked;
-                        if (blocked) layer.setAttribute("aria-hidden", "true");
-                        else layer.removeAttribute("aria-hidden");
-                    },
-                );
+                $("covey-pages").inert =
+                    setOpen || sheet || !!detailEvent || taskComposerOpen;
                 if (!active) {
                     todayOverlaySignature = "";
                     return;
@@ -1312,33 +1670,24 @@
                     todayWeatherStatus,
                     todayWeather,
                     todayWeatherMessage,
+                    householdTasks.map((task) => [task.id, task.status, task.revision, task.title, task.dueDate, task.dueTime]),
                 ]);
                 if (!force && signature === todayOverlaySignature) return;
                 const focusedId = overlay.contains(document.activeElement)
                     ? document.activeElement.id
                     : "";
                 overlay.innerHTML = "";
-                overlay.setAttribute("role", "dialog");
-                overlay.setAttribute("aria-modal", "true");
+                overlay.setAttribute("role", "region");
+                overlay.removeAttribute("aria-modal");
                 overlay.setAttribute("aria-label", "Family calendar at a glance");
                 overlay.onkeydown = (event) => {
                     if (event.key === "Escape") {
-                        event.preventDefault();
-                        event.stopPropagation();
                         if (todayWeatherTransitioning) return;
-                        if (todayWeatherPanelOpen) navigateAmbientWeather(false);
-                        else closeTodayOverlay(true);
-                        return;
-                    }
-                    if (event.key !== "Tab") return;
-                    const controls = [...overlay.querySelectorAll("button:not(:disabled), a[href]")];
-                    if (!controls.length) return;
-                    if (event.shiftKey && document.activeElement === controls[0]) {
-                        event.preventDefault();
-                        controls[controls.length - 1].focus();
-                    } else if (!event.shiftKey && document.activeElement === controls[controls.length - 1]) {
-                        event.preventDefault();
-                        controls[0].focus();
+                        if (todayWeatherPanelOpen) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            navigateAmbientWeather(false);
+                        }
                     }
                 };
                 const page = el("main", "ambient-page");
@@ -1507,6 +1856,24 @@
                     if (scheduleEvents.length > 4)
                         rail.append(el("p", "ambient-more", `+${scheduleEvents.length - 4} more on the calendar`));
                 }
+                const relevantTasks = selectGlanceTasks(householdTasks);
+                if (relevantTasks.length) {
+                    const taskModule = el("button", "ambient-task-module");
+                    taskModule.type = "button";
+                    taskModule.setAttribute("aria-label", `Open Tasks, ${relevantTasks.length} needing attention`);
+                    const taskHeading = el("span", "ambient-task-heading");
+                    taskHeading.append(el("strong", "", "Tasks"), el("small", "", String(relevantTasks.length)));
+                    taskModule.append(taskHeading);
+                    relevantTasks.forEach((task) => {
+                        const item = el("span", "ambient-task-item");
+                        item.append(el("span", "ambient-task-title", task.title));
+                        const pile = taskFacePile(task, true);
+                        if (pile) item.append(pile);
+                        taskModule.append(item);
+                    });
+                    taskModule.onclick = () => setActivePage("tasks", { userInitiated: true });
+                    rail.append(taskModule);
+                }
                 glanceMain.append(focusPanel, rail);
                 const footer = el("footer", "ambient-glance-footer");
                 const sync = el("span");
@@ -1522,12 +1889,6 @@
                               ? `Offline · synced ${timeAgo(lastSyncAt)}`
                               : "Calendar unavailable",
                 ));
-                const openCalendar = el("button", "ambient-open-calendar", "Open calendar");
-                openCalendar.id = "today-overlay-close";
-                openCalendar.type = "button";
-                openCalendar.setAttribute("aria-label", "Open calendar and leave Glance mode");
-                openCalendar.insertAdjacentHTML("afterbegin", ic("calendar-days", 17));
-                openCalendar.onclick = () => closeTodayOverlay(true);
                 const footerActions = el("div", "ambient-footer-actions");
                 const openSettings = el("button", "ambient-settings", "Settings");
                 openSettings.type = "button";
@@ -1537,7 +1898,7 @@
                     setOpen = true;
                     render();
                 };
-                footerActions.append(openSettings, openCalendar);
+                footerActions.append(openSettings);
                 footer.append(sync, footerActions);
                 content.append(header, glanceMain, footer);
 
@@ -1587,7 +1948,6 @@
                     stateAction.onclick = weatherState === "error"
                         ? loadTodayWeather
                         : () => {
-                              closeTodayOverlay(false);
                               setOpen = true;
                               setTab = "today";
                               render();
@@ -1669,6 +2029,7 @@
                 page.append(content, weatherView);
                 overlay.append(page);
                 todayOverlaySignature = signature;
+                alignPagePagination();
                 if (startedEvent && todayEventChimeEnabled)
                     playEventStartChime();
                 if (focusedId) overlay.querySelector("#" + focusedId)?.focus();
@@ -1832,12 +2193,10 @@
                 }, CHROME_IDLE_MS);
             }
             function noteUserActivity(event) {
-                // Glance is an interactive surface. General activity should not
-                // dismiss it; only its explicit Open calendar action (or Escape)
-                // leaves the mode.
-                if (todayOverlayOpen) return;
-                ambientReadyAt = Date.now() + AMBIENT_IDLE_MS;
-                wakeChrome();
+                if (activePage !== "glance") {
+                    ambientReadyAt = Date.now() + AMBIENT_IDLE_MS;
+                    wakeChrome();
+                }
             }
             function layoutDay(list) {
                 const items = list
@@ -3478,13 +3837,27 @@
             $("event-detail").onclick = (e) => {
                 if (e.target === $("event-detail")) closeEventDetails();
             };
+            $("task-composer-form").onsubmit = createTask;
+            $("task-composer-close").onclick = () =>
+                setTaskComposerOpen(false);
+            $("task-composer").onclick = (event) => {
+                if (event.target === $("task-composer"))
+                    setTaskComposerOpen(false);
+            };
+            $("task-due-date").onchange = (event) => {
+                const time = $("task-due-time");
+                time.disabled = !event.target.value;
+                if (time.disabled) time.value = "";
+            };
             document.addEventListener("keydown", (e) => {
                 if (e.key !== "Escape") return;
-                if (todayOverlayOpen) {
-                    closeTodayOverlay(true);
+                if (activePage === "glance" && todayWeatherPanelOpen) {
+                    navigateAmbientWeather(false);
                     return;
                 }
-                if (detailEvent) {
+                if (taskComposerOpen) {
+                    setTaskComposerOpen(false);
+                } else if (detailEvent) {
                     closeEventDetails();
                 } else if (setOpen) {
                     if (setTab === "calendars" && calendarFormOpen) {
@@ -3542,8 +3915,7 @@
                 todayViewEnabled = event.target.checked;
                 saveSet();
                 renderTodaySettings();
-                if (!todayViewEnabled) closeTodayOverlay(false);
-                else checkTodayView();
+                if (todayViewEnabled) checkTodayView();
             };
             $("today-event-chime").onchange = (event) => {
                 todayEventChimeEnabled = event.target.checked;
@@ -3620,7 +3992,101 @@
                     render();
                 }
             };
-            $("addbtn").onclick = () => openSheet(sel);
+            document.querySelectorAll(".page-pagination-target").forEach((button) => {
+                button.onclick = () =>
+                    setActivePage(button.dataset.page, {
+                        userInitiated: true,
+                    });
+                button.onkeydown = (event) => {
+                    const current = COVEY_PAGES.indexOf(activePage);
+                    let target = null;
+                    if (event.key === "ArrowLeft") target = Math.max(0, current - 1);
+                    if (event.key === "ArrowRight")
+                        target = Math.min(COVEY_PAGES.length - 1, current + 1);
+                    if (event.key === "Home") target = 0;
+                    if (event.key === "End") target = COVEY_PAGES.length - 1;
+                    if (target === null) return;
+                    event.preventDefault();
+                    setActivePage(COVEY_PAGES[target], {
+                        userInitiated: true,
+                        focus: true,
+                    });
+                };
+            });
+            let pageGesture = null,
+                suppressPageClick = false;
+            const pageViewport = $("covey-pages");
+            const pageTrack = $("covey-page-track");
+            pageViewport.addEventListener("pointerdown", (event) => {
+                if (
+                    !event.isPrimary ||
+                    setOpen ||
+                    sheet ||
+                    detailEvent ||
+                    todayWeatherTransitioning ||
+                    event.target.closest("button,input,select,a,[role='button']")
+                )
+                    return;
+                pageGesture = {
+                    id: event.pointerId,
+                    x: event.clientX,
+                    y: event.clientY,
+                    time: performance.now(),
+                    horizontal: false,
+                };
+            });
+            pageViewport.addEventListener("pointermove", (event) => {
+                if (!pageGesture || pageGesture.id !== event.pointerId) return;
+                let dx = event.clientX - pageGesture.x;
+                const dy = event.clientY - pageGesture.y;
+                if (!pageGesture.horizontal) {
+                    if (Math.max(Math.abs(dx), Math.abs(dy)) < 12) return;
+                    if (Math.abs(dy) >= Math.abs(dx)) {
+                        pageGesture = null;
+                        return;
+                    }
+                    pageGesture.horizontal = true;
+                    pageViewport.setPointerCapture(event.pointerId);
+                    pageTrack.classList.add("is-dragging");
+                }
+                event.preventDefault();
+                const index = COVEY_PAGES.indexOf(activePage);
+                if ((index === 0 && dx > 0) || (index === COVEY_PAGES.length - 1 && dx < 0))
+                    dx *= 0.22;
+                pageTrack.style.transform = `translate3d(calc(${-index * 100}% + ${dx}px),0,0)`;
+            });
+            const finishPageGesture = (event) => {
+                if (!pageGesture || pageGesture.id !== event.pointerId) return;
+                const gesture = pageGesture;
+                pageGesture = null;
+                pageTrack.classList.remove("is-dragging");
+                pageTrack.style.removeProperty("transform");
+                if (!gesture.horizontal) return;
+                const dx = event.clientX - gesture.x;
+                const elapsed = Math.max(1, performance.now() - gesture.time);
+                const velocity = Math.abs(dx) / elapsed;
+                let index = COVEY_PAGES.indexOf(activePage);
+                if (Math.abs(dx) > 64 || velocity > 0.45)
+                    index += dx < 0 ? 1 : -1;
+                index = Math.max(0, Math.min(COVEY_PAGES.length - 1, index));
+                suppressPageClick = true;
+                setTimeout(() => {
+                    suppressPageClick = false;
+                }, 0);
+                setActivePage(COVEY_PAGES[index], { userInitiated: true });
+            };
+            pageViewport.addEventListener("pointerup", finishPageGesture);
+            pageViewport.addEventListener("pointercancel", finishPageGesture);
+            pageViewport.addEventListener("click", (event) => {
+                if (!suppressPageClick) return;
+                event.preventDefault();
+                event.stopPropagation();
+                suppressPageClick = false;
+            }, true);
+            $("addbtn").onclick = () => {
+                if (activePage === "tasks") setTaskComposerOpen(true);
+                else openSheet(sel);
+            };
             $("prev").onclick = () => go(-1);
             $("next").onclick = () => go(1);
             $("todaybtn").onclick = goToNow;
@@ -3651,6 +4117,9 @@
                 }
             });
             addEventListener("resize", render);
+            addEventListener("resize", () =>
+                requestAnimationFrame(alignPagePagination),
+            );
             addEventListener("load", render);
             addEventListener("load", requestScreenWakeLock);
             $("tg").addEventListener("scroll", () => {
@@ -3689,6 +4158,7 @@
                         people = c.people || [];
                         syncTitlePeople($("title").value);
                         renderWhoOptions();
+                        renderTasksPage();
                         render();
                     })
                     .catch(() => {});
@@ -3698,8 +4168,10 @@
                 updateSyncBadge();
                 load();
             };
-            icon();
             tick();
+            renderTasksPage();
+            fetchTasks();
+            setActivePage("glance");
             status("");
             updateSyncBadge();
             render();

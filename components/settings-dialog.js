@@ -203,11 +203,11 @@ export function mountSettingsDialog(root) {
                             <div class="settings-group mt-3">
                                 <div class="settings-setting-row">
                                     <span class="settings-setting-copy">
-                                        <span id="ambient-mode-label" class="settings-setting-label">Glance mode</span>
-                                        <span class="settings-setting-description">Show a glanceable family briefing when Covey is idle.</span>
+                                        <span id="ambient-mode-label" class="settings-setting-label">Return to Glance</span>
+                                        <span class="settings-setting-description">Make Glance the home page after Covey is inactive.</span>
                                     </span>
                                     <span class="settings-actions">
-                                        <button id="today-preview" type="button" class="settings-button settings-button-secondary">Preview</button>
+                                        <button id="today-preview" type="button" class="settings-button settings-button-secondary">Open</button>
                                         <input id="today-enabled" type="checkbox" role="switch" aria-labelledby="ambient-mode-label" class="settings-toggle-input" />
                                     </span>
                                 </div>

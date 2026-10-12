@@ -1,7 +1,18 @@
 export function mountCalendarShell(root) {
     if (!root) throw new Error("Calendar root is missing.");
     root.innerHTML = `
-        <div id="app-shell" class="h-full flex flex-col p-3 pt-2">
+        <div id="covey-pages" class="covey-pages" data-active-page="glance">
+          <div id="covey-page-track" class="covey-page-track">
+            <section id="glance-page" class="covey-page covey-glance-page" aria-label="Glance">
+              <div
+                id="today-overlay"
+                class="h-full overflow-hidden"
+                aria-hidden="false"
+                tabindex="-1"
+              ></div>
+            </section>
+            <section id="calendar-page" class="covey-page covey-calendar-page" aria-label="Calendar" aria-hidden="true" inert>
+              <div id="app-shell" class="h-full flex flex-col p-3 pt-2">
             <section class="flex-1 min-w-0 min-h-0 flex flex-col">
                 <header
                     id="topbar"
@@ -138,26 +149,27 @@ export function mountCalendarShell(root) {
                 </div>
                 <p class="status text-xs text-accent mt-1"></p>
             </section>
-        </div>
+              </div>
 
-        <div
-            id="today-overlay"
-            class="hidden fixed inset-0 z-[60] overflow-hidden bg-bg"
-            aria-hidden="true"
-            tabindex="-1"
-        ></div>
-
-        <button
+            </section>
+            <section id="tasks-page" class="covey-page covey-tasks-page" aria-label="Tasks" aria-hidden="true" inert>
+              <h1 class="sr-only">Tasks</h1>
+            </section>
+          </div>
+          <button
             id="addbtn"
-            class="fixed z-10 w-14 h-14 rounded-full bg-accent text-on shadow-lg grid place-items-center idle-fade"
-            style="
-                right: calc(env(safe-area-inset-right, 0px) + 1rem);
-                bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
-            "
+            class="absolute z-10 w-14 h-14 rounded-full bg-accent text-on grid place-items-center"
             aria-label="Add event"
-        >
+            hidden
+          >
             <i data-i="plus" data-s="26"></i>
-        </button>
+          </button>
+          <nav id="page-pagination" class="page-pagination" aria-label="Covey pages">
+            <button type="button" class="page-pagination-target" data-page="glance" aria-label="Open Glance" aria-current="page"><span></span></button>
+            <button type="button" class="page-pagination-target" data-page="calendar" aria-label="Open Calendar"><span></span></button>
+            <button type="button" class="page-pagination-target" data-page="tasks" aria-label="Open Tasks"><span></span></button>
+          </nav>
+        </div>
     `;
     return root.firstElementChild;
 }

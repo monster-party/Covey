@@ -102,6 +102,37 @@ test("keeps theme controls in settings and exposes settings from Glance", () => 
         app,
         /openSettings\.onclick = \(\) => \{\s*setTab = "appearance";\s*setOpen = true;\s*render\(\);/,
     );
-    assert.match(app, /overlay\.inert = !!active && setOpen/);
+    assert.match(
+        app,
+        /\$\("covey-pages"\)\.inert =\s*setOpen \|\| sheet \|\| !!detailEvent \|\| taskComposerOpen/,
+    );
     assert.match(read("style.css"), /#settings\s*\{\s*z-index:\s*70/);
+});
+
+test("presents Glance, Calendar, and Tasks as swipeable sibling pages", () => {
+    const app = read("app.js");
+    const calendar = read("components/calendar-shell.js");
+    const styles = read("style.css");
+
+    ["glance", "calendar", "tasks"].forEach((page) => {
+        assert.match(calendar, new RegExp(`id=["']${page}-page["']`));
+        assert.match(calendar, new RegExp(`data-page=["']${page}["']`));
+    });
+    assert.doesNotMatch(calendar, /Open calendar and leave Glance mode/);
+    assert.match(app, /const COVEY_PAGES = \["glance", "calendar", "tasks"\]/);
+    assert.match(app, /pageViewport\.addEventListener\("pointermove"/);
+    assert.match(app, /function alignPagePagination\(\)[\s\S]*?\.ambient-glance-footer/);
+    assert.match(app, /footerCenter[\s\S]*?pagination\.offsetHeight \/ 2/);
+    assert.match(app, /footerCenter[\s\S]*?addButton\.offsetHeight \/ 2/);
+    assert.doesNotMatch(app, /alignPagePagination\(\)[\s\S]{0,200}activePage !== "glance"/);
+    assert.match(calendar, /<\/div>\s*<button\s+id=["']addbtn["']/);
+    assert.match(app, /page === "tasks" \? "Add task" : "Add event"/);
+    assert.match(app, /activePage === "tasks"\) setTaskComposerOpen\(true\)/);
+    assert.match(styles, /\.page-pagination\s*\{[^}]*backdrop-filter:blur\(22px\)/s);
+    assert.match(styles, /\.page-pagination-target\s*\{[^}]*width:44px[^}]*height:44px/s);
+    assert.match(styles, /#sheet,#event-detail,#task-composer\s*\{\s*z-index:80/);
+    assert.match(styles, /data-active-page=["']tasks["'][^}]*translate3d\(-200%,0,0\)/);
+    assert.match(styles, /\.covey-page\s*\{[^}]*background:transparent/s);
+    assert.match(styles, /\.covey-glance-page \.ambient-page\s*\{[^}]*background:transparent/s);
+    assert.doesNotMatch(styles, /\.covey-tasks-page\s*\{[^}]*radial-gradient/s);
 });

@@ -116,6 +116,58 @@ export function mountEventDialogs(root) {
         </div>
 
         <div
+            id="task-composer"
+            class="hidden fixed inset-0 z-30 bg-black/50 items-center justify-center p-4"
+            style="
+                padding-top: calc(env(safe-area-inset-top, 0px) + 1rem);
+                padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1rem);
+            "
+        >
+            <section
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="task-composer-title"
+                class="bg-card border border-line rounded-2xl p-4 w-full max-w-md max-h-full flex flex-col"
+            >
+                <div class="flex items-center justify-between gap-3 mb-3 shrink-0">
+                    <h2 id="task-composer-title" class="text-lg font-medium">Add a task</h2>
+                    <button
+                        id="task-composer-close"
+                        type="button"
+                        class="w-9 h-9 grid place-items-center text-mute shrink-0"
+                        aria-label="Close task composer"
+                    ><i data-i="x"></i></button>
+                </div>
+                <form id="task-composer-form" class="task-composer-form">
+                    <label>
+                        <span>Task</span>
+                        <input id="task-title" maxlength="120" autocomplete="off" placeholder="What needs to be done?" required />
+                    </label>
+                    <div class="task-composer-schedule">
+                        <label>
+                            <span>Due date</span>
+                            <input id="task-due-date" type="date" />
+                        </label>
+                        <label>
+                            <span>Time</span>
+                            <input id="task-due-time" type="time" disabled />
+                        </label>
+                    </div>
+                    <label>
+                        <span>Notes <small>Optional</small></span>
+                        <textarea id="task-notes" maxlength="1000" rows="3" placeholder="Add a little context"></textarea>
+                    </label>
+                    <fieldset class="task-assignee-fieldset">
+                        <legend>Assign to <small>Optional</small></legend>
+                        <div id="task-assignees" class="task-assignee-options" aria-label="People assigned to this task"></div>
+                    </fieldset>
+                    <button id="task-create" type="submit" class="task-create-button">Add task</button>
+                    <p id="task-create-status" class="task-create-status" role="status"></p>
+                </form>
+            </section>
+        </div>
+
+        <div
             id="event-detail"
             class="hidden fixed inset-0 z-30 bg-black/50 items-center justify-center p-4"
             style="
