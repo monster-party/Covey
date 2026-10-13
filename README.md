@@ -132,16 +132,22 @@ runtime with:
 npm run build:macos
 ```
 
-The resulting development app is written to `artifacts/Covey Server.app`. It
-starts Covey Server in the background, reports its status from the menu bar,
-opens the calendar in the default browser, and stores application data in
+The resulting development app is written to `artifacts/Covey Server.app`. On
+first launch it walks through iCloud setup, stores the Apple ID email and
+app-specific password in macOS Keychain, and starts Covey Server only after
+setup is complete. It reports status from the menu bar, opens the calendar in
+the default browser, and stores application data in
 `~/Library/Application Support/Covey Server`. The bundle includes its own Node.js
 runtime, so people using the app do not need Node or npm installed.
 
+Covey Server listens on the Mac's local network so household devices on the
+same Wi-Fi can connect. Use **Copy address** in the menu bar to copy the Mac's
+current network URL. macOS may ask for permission to accept incoming network
+connections the first time a new development build runs.
+
 This phase produces an ad-hoc signed development build rather than a notarized
-DMG. Until the setup and Keychain phase is complete, the app reads iCloud
-credentials from the environment used to launch it. A manual npm installation
-remains fully supported alongside the app.
+DMG. Environment credentials remain available as a development fallback, and a
+manual npm installation remains fully supported alongside the app.
 
 ## How it works
 

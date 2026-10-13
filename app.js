@@ -1,3 +1,4 @@
+            import "./theme.js";
             import {
                 ambientEventKey,
                 ambientEventKind,

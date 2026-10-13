@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 @MainActor
@@ -7,6 +8,7 @@ final class ServerController: ObservableObject {
         case stopped
         case starting
         case running
+        case needsSetup
         case failed(String)
 
         var title: String {
@@ -14,6 +16,7 @@ final class ServerController: ObservableObject {
             case .stopped: return "Stopped"
             case .starting: return "Starting…"
             case .running: return "Running"
+            case .needsSetup: return "Setup required"
             case .failed: return "Needs attention"
             }
         }
@@ -23,6 +26,7 @@ final class ServerController: ObservableObject {
             case .stopped: return "stop.circle"
             case .starting: return "arrow.triangle.2.circlepath"
             case .running: return "checkmark.circle.fill"
+            case .needsSetup: return "person.crop.circle.badge.exclamationmark"
             case .failed: return "exclamationmark.triangle.fill"
             }
         }
@@ -30,11 +34,15 @@ final class ServerController: ObservableObject {
 
     @Published private(set) var state: State = .stopped
     @Published private(set) var recentLog = ""
+    @Published private(set) var isUsingExistingServer = false
+    @Published private(set) var onboardingRequired = false
 
     let port: Int
     private var process: Process?
+    private var startupTask: Task<Void, Never>?
     private var healthTask: Task<Void, Never>?
     private var isStopping = false
+    private let credentialStore = CredentialStore()
 
     init(port: Int = 3030, startAutomatically: Bool = true) {
         self.port = port
@@ -47,17 +55,44 @@ final class ServerController: ObservableObject {
         URL(string: "http://127.0.0.1:\(port)")!
     }
 
+    var networkURL: URL {
+        URL(string: "http://\(Self.localIPv4Address() ?? ProcessInfo.processInfo.hostName):\(port)")!
+    }
+
     var failureMessage: String? {
         if case let .failed(message) = state { return message }
         return nil
     }
 
     func start() {
-        guard process == nil else { return }
+        guard process == nil, startupTask == nil else { return }
         state = .starting
         recentLog = ""
         isStopping = false
+        isUsingExistingServer = false
 
+        startupTask = Task { [weak self] in
+            guard let self else { return }
+            if await self.serverIsHealthy() {
+                self.recentLog = "Connected to an existing healthy Covey Server on port \(self.port)."
+                self.isUsingExistingServer = true
+                self.state = .running
+                self.startupTask = nil
+                return
+            }
+            if Task.isCancelled { return }
+            guard let credentials = self.resolvedCredentials() else {
+                self.state = .needsSetup
+                self.onboardingRequired = true
+                self.startupTask = nil
+                return
+            }
+            self.startupTask = nil
+            self.launchBundledServer(credentials: credentials)
+        }
+    }
+
+    private func launchBundledServer(credentials: ICloudCredentials) {
         do {
             let paths = try runtimePaths()
             let inheritedEnvironment = ProcessInfo.processInfo.environment
@@ -78,8 +113,10 @@ final class ServerController: ObservableObject {
                 "COVEY_RUNTIME_ROOT": paths.root.path,
                 "COVEY_ASSETS_DIR": paths.publicAssets.path,
                 "COVEY_DATA_DIR": dataDirectory.path,
-                "COVEY_HOST": "127.0.0.1",
+                "COVEY_HOST": "0.0.0.0",
                 "PORT": String(port),
+                "ICLOUD_EMAIL": credentials.email,
+                "ICLOUD_APP_PASSWORD": credentials.appSpecificPassword,
             ]) { _, hostValue in hostValue }
 
             output.fileHandleForReading.readabilityHandler = { [weak self] handle in
@@ -102,21 +139,68 @@ final class ServerController: ObservableObject {
     }
 
     func stop() {
+        Task { await stopAndWait() }
+    }
+
+    func stopAndWait() async {
+        startupTask?.cancel()
+        startupTask = nil
         healthTask?.cancel()
         healthTask = nil
         guard let process else {
+            isUsingExistingServer = false
             state = .stopped
             return
         }
         isStopping = true
         if process.isRunning { process.terminate() }
+        for _ in 0..<20 where process.isRunning {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        if process.isRunning {
+            process.interrupt()
+            for _ in 0..<10 where process.isRunning {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
         self.process = nil
+        isUsingExistingServer = false
         state = .stopped
     }
 
     func restart() {
-        stop()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in self?.start() }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.stopAndWait()
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            self.start()
+        }
+    }
+
+    func configureCredentials(email: String, password: String) throws {
+        let normalizedEmail = email.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedPassword = password.filter { !$0.isWhitespace }
+        guard normalizedEmail.contains("@"), normalizedEmail.count <= 254 else {
+            throw OnboardingError.invalidEmail
+        }
+        guard !normalizedPassword.isEmpty else {
+            throw OnboardingError.missingPassword
+        }
+        try credentialStore.save(ICloudCredentials(
+            email: normalizedEmail,
+            appSpecificPassword: normalizedPassword
+        ))
+        onboardingRequired = false
+        start()
+    }
+
+    private func resolvedCredentials() -> ICloudCredentials? {
+        if let stored = try? credentialStore.load() { return stored }
+        let environment = ProcessInfo.processInfo.environment
+        let email = String(environment["ICLOUD_EMAIL"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let password = String(environment["ICLOUD_APP_PASSWORD"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !email.isEmpty, !password.isEmpty else { return nil }
+        return ICloudCredentials(email: email, appSpecificPassword: password)
     }
 
     func openCovey() {
@@ -125,13 +209,45 @@ final class ServerController: ObservableObject {
 
     func copyAddress() {
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(serverURL.absoluteString, forType: .string)
+        NSPasteboard.general.setString(networkURL.absoluteString, forType: .string)
     }
 
     func copyDiagnostics() {
-        let text = "Covey Server: \(state.title)\nAddress: \(serverURL.absoluteString)\n\n\(recentLog)"
+        let text = "Covey Server: \(state.title)\nLocal address: \(serverURL.absoluteString)\nNetwork address: \(networkURL.absoluteString)\n\n\(recentLog)"
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    private static func localIPv4Address() -> String? {
+        var interfaces: UnsafeMutablePointer<ifaddrs>?
+        guard getifaddrs(&interfaces) == 0, let first = interfaces else { return nil }
+        defer { freeifaddrs(interfaces) }
+
+        var fallback: String?
+        for pointer in sequence(first: first, next: { $0.pointee.ifa_next }) {
+            let interface = pointer.pointee
+            guard let address = interface.ifa_addr, address.pointee.sa_family == UInt8(AF_INET) else { continue }
+            let flags = Int32(interface.ifa_flags)
+            guard flags & IFF_UP != 0, flags & IFF_LOOPBACK == 0 else { continue }
+
+            var hostname = [CChar](repeating: 0, count: Int(NI_MAXHOST))
+            let length = socklen_t(address.pointee.sa_len)
+            guard getnameinfo(
+                address,
+                length,
+                &hostname,
+                socklen_t(hostname.count),
+                nil,
+                0,
+                NI_NUMERICHOST
+            ) == 0 else { continue }
+
+            let value = String(cString: hostname)
+            let name = String(cString: interface.ifa_name)
+            if name == "en0" || name == "en1" { return value }
+            fallback = fallback ?? value
+        }
+        return fallback
     }
 
     private func waitForHealth() {
@@ -141,16 +257,10 @@ final class ServerController: ObservableObject {
             for _ in 0..<30 {
                 if Task.isCancelled { return }
                 guard self.process?.isRunning == true else { return }
-                do {
-                    let (data, response) = try await URLSession.shared.data(from: self.serverURL.appendingPathComponent("api/health"))
-                    if let http = response as? HTTPURLResponse,
-                       http.statusCode == 200,
-                       let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                       value["service"] as? String == "covey-server" {
-                        self.state = .running
-                        return
-                    }
-                } catch {}
+                if await self.serverIsHealthy() {
+                    self.state = .running
+                    return
+                }
                 try? await Task.sleep(nanoseconds: 250_000_000)
             }
             if self.process?.isRunning == true {
@@ -159,10 +269,26 @@ final class ServerController: ObservableObject {
         }
     }
 
+    private func serverIsHealthy() async -> Bool {
+        var request = URLRequest(url: serverURL.appendingPathComponent("api/health"))
+        request.timeoutInterval = 1
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  http.statusCode == 200,
+                  let value = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return false }
+            return value["service"] as? String == "covey-server"
+        } catch {
+            return false
+        }
+    }
+
     private func handleTermination(status: Int32) {
         healthTask?.cancel()
         healthTask = nil
         process = nil
+        isUsingExistingServer = false
         if isStopping {
             isStopping = false
             state = .stopped
@@ -228,6 +354,18 @@ private enum HostError: LocalizedError {
         switch self {
         case .missingResources: return "The application resource directory is unavailable."
         case let .missingRuntime(path): return "The bundled server is incomplete: \(path)"
+        }
+    }
+}
+
+private enum OnboardingError: LocalizedError {
+    case invalidEmail
+    case missingPassword
+
+    var errorDescription: String? {
+        switch self {
+        case .invalidEmail: return "Enter a valid Apple ID email address."
+        case .missingPassword: return "Enter an Apple app-specific password."
         }
     }
 }

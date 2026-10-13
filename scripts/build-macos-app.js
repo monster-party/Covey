@@ -15,6 +15,13 @@ const appDirectory = path.join(rootDirectory, 'artifacts', 'Covey Server.app');
 const contentsDirectory = path.join(appDirectory, 'Contents');
 const macOSDirectory = path.join(contentsDirectory, 'MacOS');
 const resourcesDirectory = path.join(contentsDirectory, 'Resources');
+const iconsetDirectory = path.join(rootDirectory, 'macos', '.build', 'CoveyServer.iconset');
+const appIconSource = path.join(rootDirectory, 'macos', '.build', 'CoveyServer-app-icon.png');
+
+function run(command, argumentsList) {
+  const result = spawnSync(command, argumentsList, { stdio: 'inherit' });
+  if (result.status !== 0) throw new Error(`${command} failed with status ${result.status}.`);
+}
 
 const swift = spawnSync('swift', [
   'build',
@@ -45,6 +52,34 @@ fs.mkdirSync(resourcesDirectory, { recursive: true });
 fs.copyFileSync(hostExecutable, path.join(macOSDirectory, 'CoveyServer'));
 fs.chmodSync(path.join(macOSDirectory, 'CoveyServer'), 0o755);
 fs.cpSync(artifactDirectory, path.join(resourcesDirectory, 'Server'), { recursive: true });
+run('xcrun', [
+  'swift',
+  path.join(rootDirectory, 'scripts', 'render-macos-menu-icon.swift'),
+  appIconSource,
+  path.join(resourcesDirectory, 'CoveyMenuBarTemplate.png'),
+]);
+
+fs.rmSync(iconsetDirectory, { recursive: true, force: true });
+fs.mkdirSync(iconsetDirectory, { recursive: true });
+for (const [filename, size] of [
+  ['icon_16x16.png', 16],
+  ['icon_16x16@2x.png', 32],
+  ['icon_32x32.png', 32],
+  ['icon_32x32@2x.png', 64],
+  ['icon_128x128.png', 128],
+  ['icon_128x128@2x.png', 256],
+  ['icon_256x256.png', 256],
+  ['icon_256x256@2x.png', 512],
+  ['icon_512x512.png', 512],
+  ['icon_512x512@2x.png', 1024],
+]) {
+  run('sips', ['-z', String(size), String(size), appIconSource, '--out', path.join(iconsetDirectory, filename)]);
+}
+run('iconutil', [
+  '-c', 'icns',
+  iconsetDirectory,
+  '-o', path.join(resourcesDirectory, 'CoveyServer.icns'),
+]);
 
 const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -53,6 +88,7 @@ const infoPlist = `<?xml version="1.0" encoding="UTF-8"?>
   <key>CFBundleDevelopmentRegion</key><string>en</string>
   <key>CFBundleExecutable</key><string>CoveyServer</string>
   <key>CFBundleIdentifier</key><string>com.covey.server</string>
+  <key>CFBundleIconFile</key><string>CoveyServer</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleName</key><string>Covey Server</string>
   <key>CFBundlePackageType</key><string>APPL</string>

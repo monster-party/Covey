@@ -36,6 +36,14 @@ test("mounts calendar, dialog, and settings components before binding the app", 
     assert.match(app, /mountSettingsDialog\(document\.getElementById\(["']settings-root["']\)\)/);
 });
 
+test("includes the theme bootstrap in the production module graph", () => {
+    const index = read("index.html");
+    const app = read("app.js");
+
+    assert.doesNotMatch(index, /<script src="theme\.js"><\/script>/);
+    assert.match(app, /import "\.\/theme\.js";/);
+});
+
 test("keeps the mounted calendar root at full viewport height", () => {
     const styles = read("style.css");
 
