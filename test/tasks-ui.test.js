@@ -42,7 +42,7 @@ test("adds a newly created authoritative task to the local collection", () => {
     assert.deepEqual(mergeTaskResponse([existing], created), [existing, created]);
 });
 
-test("keeps Glance quiet at zero tasks and caps overdue/today summaries at three", () => {
+test("keeps Today quiet at zero tasks and caps overdue/today summaries at three", () => {
     assert.deepEqual(selectGlanceTasks([], "2026-10-12"), []);
     assert.deepEqual(
         selectGlanceTasks([task("one", { dueDate: "2026-10-12" })], "2026-10-12").map(({ id }) => id),

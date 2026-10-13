@@ -89,7 +89,7 @@ test("restores settled calendar chrome for touch gestures without blocking scrol
     );
 });
 
-test("keeps theme controls in settings and exposes settings from Glance", () => {
+test("keeps theme controls in settings and exposes settings from Today", () => {
     const app = read("app.js");
     const calendar = read("components/calendar-shell.js");
     const settings = read("components/settings-dialog.js");
@@ -106,7 +106,22 @@ test("keeps theme controls in settings and exposes settings from Glance", () => 
     assert.match(read("style.css"), /#settings\s*\{\s*z-index:\s*70/);
 });
 
-test("presents Glance, Calendar, and Tasks as swipeable sibling pages", () => {
+test("presents sound as a global setting with individual household alerts", () => {
+    const app = read("app.js");
+    const settings = read("components/settings-dialog.js");
+
+    assert.match(settings, /id=["']tab-sounds["']/);
+    assert.match(settings, /id=["']sounds-enabled["']/);
+    assert.match(settings, /id=["']today-event-chime["']/);
+    assert.match(settings, /id=["']task-complete-sound["']/);
+    assert.match(settings, /id=["']task-complete-preview["']/);
+    assert.match(app, /startedEvent && soundsEnabled && todayEventChimeEnabled/);
+    assert.match(app, /soundsEnabled && taskCompleteSoundEnabled/);
+    assert.match(app, /soundsEnabled = st\.soundsEnabled !== false/);
+    assert.match(app, /taskCompleteSoundEnabled = st\.taskCompleteSoundEnabled !== false/);
+});
+
+test("presents Today, Calendar, and Tasks as swipeable sibling pages", () => {
     const app = read("app.js");
     const calendar = read("components/calendar-shell.js");
     const styles = read("style.css");
@@ -115,6 +130,8 @@ test("presents Glance, Calendar, and Tasks as swipeable sibling pages", () => {
         assert.match(calendar, new RegExp(`id=["']${page}-page["']`));
         assert.match(calendar, new RegExp(`data-page=["']${page}["']`));
     });
+    assert.match(calendar, /aria-label=["']Today["']/);
+    assert.match(calendar, /aria-label=["']Open Today["']/);
     assert.doesNotMatch(calendar, /Open calendar and leave Glance mode/);
     assert.match(app, /const COVEY_PAGES = \["glance", "calendar", "tasks"\]/);
     assert.match(app, /pageViewport\.addEventListener\("pointermove"/);

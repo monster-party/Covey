@@ -3,7 +3,7 @@ export function mountCalendarShell(root) {
     root.innerHTML = `
         <div id="covey-pages" class="covey-pages" data-active-page="glance">
           <div id="covey-page-track" class="covey-page-track">
-            <section id="glance-page" class="covey-page covey-glance-page" aria-label="Glance">
+            <section id="glance-page" class="covey-page covey-glance-page" aria-label="Today">
               <div
                 id="today-overlay"
                 class="h-full overflow-hidden"
@@ -147,7 +147,7 @@ export function mountCalendarShell(root) {
               <i data-i="settings" data-s="18"></i>
             </button>
             <nav id="page-pagination" class="page-pagination" aria-label="Covey pages">
-              <button type="button" class="page-pagination-target" data-page="glance" aria-label="Open Glance" aria-current="page"><span></span></button>
+              <button type="button" class="page-pagination-target" data-page="glance" aria-label="Open Today" aria-current="page"><span></span></button>
               <button type="button" class="page-pagination-target" data-page="calendar" aria-label="Open Calendar"><span></span></button>
               <button type="button" class="page-pagination-target" data-page="tasks" aria-label="Open Tasks"><span></span></button>
             </nav>

@@ -729,6 +729,7 @@ textarea:disabled {
 #settings-dialog #calendar-add-view,
 #settings-dialog #tab-view,
 #settings-dialog #tab-today,
+#settings-dialog #tab-sounds,
 #settings-dialog #tab-appearance,
 #settings-dialog #tab-about {
   width: min(100%, 46rem);

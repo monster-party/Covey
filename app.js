@@ -27,7 +27,6 @@
             );
             eventStartChime.preload = "auto";
             taskCompleteSound.preload = "auto";
-            taskCompleteSound.volume = 0.72;
             let eventStartChimePrimed = false;
             function playEventStartChime() {
                 eventStartChime.volume = todayEventChimeVolume / 100;
@@ -39,6 +38,7 @@
                 });
             }
             function playTaskCompleteSound() {
+                taskCompleteSound.volume = todayEventChimeVolume / 100;
                 taskCompleteSound.pause();
                 taskCompleteSound.currentTime = 0;
                 taskCompleteSound.play().catch(() => {});
@@ -303,7 +303,9 @@
                 compactWeek = false,
                 keepScreenAwake = false,
                 todayViewEnabled = true,
+                soundsEnabled = true,
                 todayEventChimeEnabled = true,
+                taskCompleteSoundEnabled = true,
                 todayEventChimeVolume = 55,
                 todayWeatherEnabled = true,
                 todayWeatherLocation = "",
@@ -333,7 +335,9 @@
                 compactWeek = !!st.compactWeek;
                 keepScreenAwake = !!st.keepScreenAwake;
                 todayViewEnabled = st.todayViewEnabled !== false;
+                soundsEnabled = st.soundsEnabled !== false;
                 todayEventChimeEnabled = st.todayEventChimeEnabled !== false;
+                taskCompleteSoundEnabled = st.taskCompleteSoundEnabled !== false;
                 if (Number.isFinite(st.todayEventChimeVolume))
                     todayEventChimeVolume = Math.min(
                         100,
@@ -439,7 +443,9 @@
                             compactWeek,
                             keepScreenAwake,
                             todayViewEnabled,
+                            soundsEnabled,
                             todayEventChimeEnabled,
+                            taskCompleteSoundEnabled,
                             todayEventChimeVolume,
                             todayWeatherEnabled,
                             todayWeatherLocation,
@@ -788,7 +794,8 @@
                 if (completed) {
                     button.disabled = true;
                     button.closest(".task-row")?.classList.add("is-completing");
-                    playTaskCompleteSound();
+                    if (soundsEnabled && taskCompleteSoundEnabled)
+                        playTaskCompleteSound();
                     await new Promise((resolve) => setTimeout(resolve, 420));
                 }
                 const previous = task;
@@ -1139,17 +1146,21 @@
             }
             function renderTodaySettings() {
                 $("today-enabled").checked = todayViewEnabled;
+                $("sounds-enabled").checked = soundsEnabled;
                 $("today-event-chime").checked = todayEventChimeEnabled;
-                $("today-event-chime").disabled = !todayViewEnabled;
+                $("task-complete-sound").checked = taskCompleteSoundEnabled;
+                $("today-event-chime").disabled = !soundsEnabled;
+                $("task-complete-sound").disabled = !soundsEnabled;
                 $("today-chime-volume").value = todayEventChimeVolume;
                 $("today-chime-volume-value").textContent = `${todayEventChimeVolume}%`;
-                $("today-chime-volume").disabled =
-                    !todayViewEnabled || !todayEventChimeEnabled;
+                $("today-chime-volume").disabled = !soundsEnabled;
                 $("today-chime-preview").disabled =
-                    !todayViewEnabled || !todayEventChimeEnabled;
-                $("today-chime-controls").setAttribute(
+                    !soundsEnabled || !todayEventChimeEnabled;
+                $("task-complete-preview").disabled =
+                    !soundsEnabled || !taskCompleteSoundEnabled;
+                $("sound-volume-controls").setAttribute(
                     "aria-disabled",
-                    String(!todayViewEnabled || !todayEventChimeEnabled),
+                    String(!soundsEnabled),
                 );
                 $("today-preview").disabled = !todayViewEnabled;
                 document.querySelectorAll("[data-ambient-preview]").forEach((button) => {
@@ -1676,7 +1687,7 @@
                 overlay.innerHTML = "";
                 overlay.setAttribute("role", "region");
                 overlay.removeAttribute("aria-modal");
-                overlay.setAttribute("aria-label", "Family calendar at a glance");
+                overlay.setAttribute("aria-label", "Family calendar for today");
                 overlay.onkeydown = (event) => {
                     if (event.key === "Escape") {
                         if (todayWeatherTransitioning) return;
@@ -1928,9 +1939,9 @@
                         el("p", null, weatherState === "error"
                             ? todayWeatherMessage
                             : weatherState === "off"
-                              ? "Turn weather on in Glance settings."
+                              ? "Turn weather on in Today settings."
                               : weatherState === "needs-location"
-                                ? "Add a city or postal code in Glance settings."
+                                ? "Add a city or postal code in Today settings."
                                 : "The local forecast will appear shortly."),
                     );
                     const stateAction = el("button", "ambient-weather-action", weatherState === "error" ? "Try again" : "Open weather settings");
@@ -2019,7 +2030,7 @@
                 overlay.append(page);
                 todayOverlaySignature = signature;
                 alignPagePagination();
-                if (startedEvent && todayEventChimeEnabled)
+                if (startedEvent && soundsEnabled && todayEventChimeEnabled)
                     playEventStartChime();
                 if (focusedId) overlay.querySelector("#" + focusedId)?.focus();
                 if (
@@ -2887,7 +2898,8 @@
                             calendars: "Calendars",
                             people: "People",
                             view: "View",
-                            today: "Glance",
+                            today: "Today",
+                            sounds: "Sounds",
                             appearance: "Appearance",
                             about: "About",
                         })[setTab];
@@ -2909,7 +2921,8 @@
                     ["calendars", "Calendars", "calendar-days", "Manage"],
                     ["people", "People", "users", "Manage"],
                     ["view", "View", "columns-3", "Preferences"],
-                    ["today", "Glance", "sun", "Preferences"],
+                    ["today", "Today", "sun", "Preferences"],
+                    ["sounds", "Sounds", "bell", "Preferences"],
                     ["appearance", "Appearance", "paintbrush-vertical", "Preferences"],
                     ["about", "About", "heart", "Covey"],
                 ];
@@ -3904,8 +3917,18 @@
                 renderTodaySettings();
                 if (todayViewEnabled) checkTodayView();
             };
+            $("sounds-enabled").onchange = (event) => {
+                soundsEnabled = event.target.checked;
+                saveSet();
+                renderTodaySettings();
+            };
             $("today-event-chime").onchange = (event) => {
                 todayEventChimeEnabled = event.target.checked;
+                saveSet();
+                renderTodaySettings();
+            };
+            $("task-complete-sound").onchange = (event) => {
+                taskCompleteSoundEnabled = event.target.checked;
                 saveSet();
                 renderTodaySettings();
             };
@@ -3915,6 +3938,7 @@
             };
             $("today-chime-volume").onchange = () => saveSet();
             $("today-chime-preview").onclick = playEventStartChime;
+            $("task-complete-preview").onclick = playTaskCompleteSound;
             $("today-preview").onclick = () => {
                 openTodayOverlay(ambientPeriod(new Date()), true);
             };

@@ -215,8 +215,8 @@ export function mountSettingsDialog(root) {
                             <div class="settings-group mt-3">
                                 <div class="settings-setting-row">
                                     <span class="settings-setting-copy">
-                                        <span id="ambient-mode-label" class="settings-setting-label">Return to Glance</span>
-                                        <span class="settings-setting-description">Make Glance the home page after Covey is inactive.</span>
+                                        <span id="ambient-mode-label" class="settings-setting-label">Return to Today</span>
+                                        <span class="settings-setting-description">Make Today the home page after Covey is inactive.</span>
                                     </span>
                                     <span class="settings-actions">
                                         <button id="today-preview" type="button" class="settings-button settings-button-secondary">Open</button>
@@ -231,24 +231,6 @@ export function mountSettingsDialog(root) {
                                     <input id="keep-screen-awake" type="checkbox" role="switch" class="settings-toggle-input" />
                                 </label>
                                 <p id="wake-lock-status" role="alert" class="settings-group-message text-xs text-mute empty:hidden"></p>
-                            </div>
-                        </section>
-                        <section class="mt-7" aria-labelledby="ambient-sound-heading">
-                            <h3 id="ambient-sound-heading" class="settings-section-title">Sound</h3>
-                            <div class="settings-group mt-3">
-                                <label class="settings-setting-row">
-                                    <span class="settings-setting-copy">
-                                        <span class="settings-setting-label">Event start chime</span>
-                                        <span class="settings-setting-description">Play a gentle alert when an event begins in Glance.</span>
-                                    </span>
-                                    <input id="today-event-chime" type="checkbox" role="switch" class="settings-toggle-input" />
-                                </label>
-                                <div id="today-chime-controls" class="settings-group-fields settings-sound-controls">
-                                    <label for="today-chime-volume" class="settings-setting-label">Volume</label>
-                                    <input id="today-chime-volume" type="range" min="10" max="100" step="5" aria-describedby="today-chime-volume-value" />
-                                    <output id="today-chime-volume-value" for="today-chime-volume">55%</output>
-                                    <button id="today-chime-preview" type="button" class="settings-button settings-button-secondary">Play sound</button>
-                                </div>
                             </div>
                         </section>
                         <section class="mt-7" aria-labelledby="ambient-weather-heading">
@@ -269,6 +251,50 @@ export function mountSettingsDialog(root) {
                                     </div>
                                     <p class="mt-2 text-xs text-mute">Your location stays in this browser. Open-Meteo receives it only to find the forecast.</p>
                                     <p id="today-weather-location-status" role="status" aria-live="polite" class="mt-2 text-xs text-mute empty:hidden"></p>
+                                </div>
+                            </div>
+                        </section>
+                    </div>
+                    <div id="tab-sounds">
+                        <section aria-labelledby="sounds-master-heading">
+                            <h3 id="sounds-master-heading" class="settings-section-title">Sound</h3>
+                            <div class="settings-group mt-3">
+                                <label class="settings-setting-row">
+                                    <span class="settings-setting-copy">
+                                        <span id="sounds-enabled-label" class="settings-setting-label">Sounds</span>
+                                        <span class="settings-setting-description">Allow Covey to play household alerts.</span>
+                                    </span>
+                                    <input id="sounds-enabled" type="checkbox" role="switch" aria-labelledby="sounds-enabled-label" class="settings-toggle-input" />
+                                </label>
+                                <div id="sound-volume-controls" class="settings-group-fields settings-sound-controls">
+                                    <label for="today-chime-volume" class="settings-setting-label">Volume</label>
+                                    <input id="today-chime-volume" type="range" min="10" max="100" step="5" aria-describedby="today-chime-volume-value" />
+                                    <output id="today-chime-volume-value" for="today-chime-volume">55%</output>
+                                </div>
+                            </div>
+                        </section>
+                        <section class="mt-7" aria-labelledby="sounds-alerts-heading">
+                            <h3 id="sounds-alerts-heading" class="settings-section-title">Alerts</h3>
+                            <div class="settings-group mt-3">
+                                <div class="settings-setting-row">
+                                    <span class="settings-setting-copy">
+                                        <span id="event-start-sound-label" class="settings-setting-label">Events starting</span>
+                                        <span class="settings-setting-description">Play a gentle chime when an event begins.</span>
+                                    </span>
+                                    <span class="settings-actions">
+                                        <button id="today-chime-preview" type="button" class="settings-button settings-button-secondary">Play</button>
+                                        <input id="today-event-chime" type="checkbox" role="switch" aria-labelledby="event-start-sound-label" class="settings-toggle-input" />
+                                    </span>
+                                </div>
+                                <div class="settings-setting-row">
+                                    <span class="settings-setting-copy">
+                                        <span id="task-complete-sound-label" class="settings-setting-label">Tasks completed</span>
+                                        <span class="settings-setting-description">Celebrate when a household task is completed.</span>
+                                    </span>
+                                    <span class="settings-actions">
+                                        <button id="task-complete-preview" type="button" class="settings-button settings-button-secondary">Play</button>
+                                        <input id="task-complete-sound" type="checkbox" role="switch" aria-labelledby="task-complete-sound-label" class="settings-toggle-input" />
+                                    </span>
                                 </div>
                             </div>
                         </section>
