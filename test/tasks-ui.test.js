@@ -36,6 +36,12 @@ test("reconciles an optimistic task with the authoritative response", () => {
     assert.deepEqual(mergeTaskResponse([original], server), [server]);
 });
 
+test("adds a newly created authoritative task to the local collection", () => {
+    const existing = task("one");
+    const created = task("two");
+    assert.deepEqual(mergeTaskResponse([existing], created), [existing, created]);
+});
+
 test("keeps Glance quiet at zero tasks and caps overdue/today summaries at three", () => {
     assert.deepEqual(selectGlanceTasks([], "2026-10-12"), []);
     assert.deepEqual(
@@ -72,4 +78,9 @@ test("task UI creates tasks from the shared page action", () => {
     assert.match(app, /method: editing \? "PUT" : "POST"/);
     assert.match(app, /edit\.onclick = \(\) => setTaskComposerOpen\(true, task\)/);
     assert.match(app, /payload\.revision = editing\.revision/);
+    assert.match(app, /task-complete\.mp3/);
+    assert.match(app, /classList\.add\("is-completing"\)/);
+    assert.match(app, /playTaskCompleteSound\(\)/);
+    assert.match(app, /method: "DELETE"/);
+    assert.match(app, /householdTasks = householdTasks\.filter/);
 });

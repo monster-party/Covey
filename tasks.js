@@ -29,7 +29,10 @@ export function groupTasks(tasks, today = taskDateKey()) {
 }
 
 export function mergeTaskResponse(tasks, task) {
-    return tasks.map((candidate) => candidate.id === task.id ? task : candidate);
+    const existing = tasks.some((candidate) => candidate.id === task.id);
+    return existing
+        ? tasks.map((candidate) => candidate.id === task.id ? task : candidate)
+        : [...tasks, task];
 }
 
 export function selectGlanceTasks(tasks, today = taskDateKey(), limit = 3) {

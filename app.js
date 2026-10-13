@@ -22,7 +22,12 @@
             const eventStartChime = new Audio(
                 new URL("./sounds/event-start-chime.mp3", import.meta.url).href,
             );
+            const taskCompleteSound = new Audio(
+                new URL("./sounds/task-complete.mp3", import.meta.url).href,
+            );
             eventStartChime.preload = "auto";
+            taskCompleteSound.preload = "auto";
+            taskCompleteSound.volume = 0.72;
             let eventStartChimePrimed = false;
             function playEventStartChime() {
                 eventStartChime.volume = todayEventChimeVolume / 100;
@@ -32,6 +37,11 @@
                     // Browsers may withhold audio until the page has received a
                     // user gesture. The visual alert still remains available.
                 });
+            }
+            function playTaskCompleteSound() {
+                taskCompleteSound.pause();
+                taskCompleteSound.currentTime = 0;
+                taskCompleteSound.play().catch(() => {});
             }
             function primeEventStartChime() {
                 if (eventStartChimePrimed) return;
@@ -658,7 +668,7 @@
                 if (tasksRequest) return tasksRequest;
                 tasksStatus = householdTasks.length ? "refreshing" : "loading";
                 tasksMessage = "";
-                renderTasksPage();
+                renderTaskSurfaces();
                 tasksRequest = fetch("/api/tasks")
                     .then(async (response) => {
                         const result = await response.json().catch(() => ({}));
@@ -666,13 +676,12 @@
                         householdTasks = Array.isArray(result.tasks) ? result.tasks : [];
                         tasksStatus = "ready";
                         if (announce) tasksMessage = "Tasks updated.";
-                        renderTasksPage();
-                        if (activePage === "glance") renderTodayOverlay(true);
+                        renderTaskSurfaces();
                     })
                     .catch((error) => {
                         tasksStatus = "error";
                         tasksMessage = error.message || "Could not load tasks.";
-                        renderTasksPage();
+                        renderTaskSurfaces();
                     })
                     .finally(() => { tasksRequest = null; });
                 return tasksRequest;
@@ -699,6 +708,11 @@
                         ? "Edit task"
                         : "Add a task";
                     $("task-create").textContent = task ? "Save changes" : "Add task";
+                    const remove = $("task-remove");
+                    remove.hidden = !task;
+                    remove.disabled = false;
+                    remove.classList.remove("is-confirming");
+                    remove.textContent = "Remove task";
                     $("task-create-status").textContent = "";
                     requestAnimationFrame(() => $("task-title").focus());
                 } else {
@@ -775,7 +789,7 @@
                             );
                             taskBeingEdited = result.current;
                         }
-                        renderTasksPage();
+                        renderTaskSurfaces();
                         throw new Error(
                             "This task changed on another device. Review it and try again.",
                         );
@@ -788,7 +802,7 @@
                     householdTasks = mergeTaskResponse(householdTasks, result.task);
                     tasksStatus = "ready";
                     tasksMessage = `${result.task.title} ${editing ? "updated" : "added"}.`;
-                    renderTasksPage();
+                    renderTaskSurfaces();
                     setTaskComposerOpen(false);
                 } catch (error) {
                     $("task-create-status").textContent =
@@ -798,8 +812,54 @@
                     button.removeAttribute("aria-busy");
                 }
             }
+            async function removeTask() {
+                const task = taskBeingEdited;
+                const button = $("task-remove");
+                if (!task || button.disabled) return;
+                if (!button.classList.contains("is-confirming")) {
+                    button.classList.add("is-confirming");
+                    button.textContent = "Confirm removal";
+                    $("task-create-status").textContent = "This removes the task for everyone.";
+                    return;
+                }
+                button.disabled = true;
+                $("task-create").disabled = true;
+                $("task-create-status").textContent = "Removing task…";
+                try {
+                    const response = await fetch(
+                        `/api/tasks/${encodeURIComponent(task.id)}?revision=${encodeURIComponent(task.revision)}`,
+                        { method: "DELETE" },
+                    );
+                    const result = await response.json().catch(() => ({}));
+                    if (response.status === 409) {
+                        if (result.current) {
+                            householdTasks = mergeTaskResponse(householdTasks, result.current);
+                            taskBeingEdited = result.current;
+                        }
+                        renderTaskSurfaces();
+                        throw new Error("This task changed on another device. Review it and try again.");
+                    }
+                    if (!response.ok) throw new Error(result.error || "Could not remove task.");
+                    householdTasks = householdTasks.filter((candidate) => candidate.id !== task.id);
+                    tasksStatus = "ready";
+                    tasksMessage = `${task.title} removed.`;
+                    renderTaskSurfaces();
+                    setTaskComposerOpen(false);
+                } catch (error) {
+                    $("task-create-status").textContent = error.message || "Could not remove task.";
+                } finally {
+                    button.disabled = false;
+                    $("task-create").disabled = false;
+                }
+            }
             async function setTaskCompleted(task, completed, button) {
                 if (button.disabled) return;
+                if (completed) {
+                    button.disabled = true;
+                    button.closest(".task-row")?.classList.add("is-completing");
+                    playTaskCompleteSound();
+                    await new Promise((resolve) => setTimeout(resolve, 420));
+                }
                 const previous = task;
                 const optimistic = {
                     ...task,
@@ -808,8 +868,7 @@
                 };
                 householdTasks = mergeTaskResponse(householdTasks, optimistic);
                 tasksMessage = `${task.title} ${completed ? "completed" : "reopened"}.`;
-                renderTasksPage();
-                if (activePage === "glance") renderTodayOverlay(true);
+                renderTaskSurfaces();
                 try {
                     const response = await fetch(`/api/tasks/${encodeURIComponent(task.id)}/${completed ? "complete" : "reopen"}`, {
                         method: "POST",
@@ -820,17 +879,17 @@
                     if (response.status === 409) {
                         if (result.current) householdTasks = mergeTaskResponse(householdTasks, result.current);
                         tasksMessage = "This task changed on another device. Tasks were refreshed.";
-                        renderTasksPage();
+                        renderTaskSurfaces();
                         await fetchTasks();
                         return;
                     }
                     if (!response.ok) throw new Error(result.error || "Could not update task.");
                     householdTasks = mergeTaskResponse(householdTasks, result.task);
-                    renderTasksPage();
+                    renderTaskSurfaces();
                 } catch (error) {
                     householdTasks = mergeTaskResponse(householdTasks, previous);
                     tasksMessage = `${error.message || "Could not update task."} Your change was undone.`;
-                    renderTasksPage();
+                    renderTaskSurfaces();
                 }
             }
             function taskRow(task, completed = false) {
@@ -922,6 +981,10 @@
                 status.setAttribute("aria-live", "polite");
                 shell.append(header, content, status);
                 page.append(shell);
+            }
+            function renderTaskSurfaces() {
+                renderTasksPage();
+                if (todayOverlayOpen) renderTodayOverlay(true);
             }
 
             function renderWhoOptions() {
@@ -1856,6 +1919,8 @@
                     if (scheduleEvents.length > 4)
                         rail.append(el("p", "ambient-more", `+${scheduleEvents.length - 4} more on the calendar`));
                 }
+                const dayStack = el("div", "ambient-day-stack");
+                dayStack.append(rail);
                 const relevantTasks = selectGlanceTasks(householdTasks);
                 if (relevantTasks.length) {
                     const taskModule = el("button", "ambient-task-module");
@@ -1872,9 +1937,9 @@
                         taskModule.append(item);
                     });
                     taskModule.onclick = () => setActivePage("tasks", { userInitiated: true });
-                    rail.append(taskModule);
+                    dayStack.append(taskModule);
                 }
-                glanceMain.append(focusPanel, rail);
+                glanceMain.append(focusPanel, dayStack);
                 const footer = el("footer", "ambient-glance-footer");
                 const sync = el("span");
                 sync.innerHTML = ic("check", 17);
@@ -3838,6 +3903,7 @@
                 if (e.target === $("event-detail")) closeEventDetails();
             };
             $("task-composer-form").onsubmit = createTask;
+            $("task-remove").onclick = removeTask;
             $("task-composer-close").onclick = () =>
                 setTaskComposerOpen(false);
             $("task-composer").onclick = (event) => {
