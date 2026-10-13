@@ -68,19 +68,16 @@ test("task UI includes rollback, conflict adoption, completion, and empty states
     assert.match(app, /ambient-task-module/);
 });
 
-test("task UI creates tasks from the shared page action", () => {
+test("task UI creates tasks from its contextual companion action", () => {
     const app = readFileSync(new URL("../app.js", import.meta.url), "utf8");
-    assert.match(app, /: "\/api\/tasks",[\s\S]*?method: editing \? "PUT" : "POST"/);
+    assert.match(app, /fetch\("\/api\/tasks", \{[\s\S]*?method: "POST"/);
     assert.match(app, /householdTasks = mergeTaskResponse\(householdTasks, result\.task\)/);
     assert.match(app, /task-composer-form["']\)\.onsubmit = createTask/);
     assert.match(app, /assigneeIds: \[\.\.\.taskAssigneeIds\]/);
     assert.match(app, /function renderTaskAssigneeOptions\(\)/);
-    assert.match(app, /method: editing \? "PUT" : "POST"/);
-    assert.match(app, /edit\.onclick = \(\) => setTaskComposerOpen\(true, task\)/);
-    assert.match(app, /payload\.revision = editing\.revision/);
+    assert.match(app, /activePage === "tasks"\) setTaskComposerOpen\(true, \$\("addbtn"\)\)/);
+    assert.doesNotMatch(app, /taskBeingEdited|removeTask|method: "DELETE"/);
     assert.match(app, /task-complete\.mp3/);
     assert.match(app, /classList\.add\("is-completing"\)/);
     assert.match(app, /playTaskCompleteSound\(\)/);
-    assert.match(app, /method: "DELETE"/);
-    assert.match(app, /householdTasks = householdTasks\.filter/);
 });

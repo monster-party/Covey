@@ -162,7 +162,6 @@ export function mountEventDialogs(root) {
                         <div id="task-assignees" class="task-assignee-options" aria-label="People assigned to this task"></div>
                     </fieldset>
                     <div class="task-composer-actions">
-                        <button id="task-remove" type="button" class="task-remove-button" hidden>Remove task</button>
                         <button id="task-create" type="submit" class="task-create-button">Add task</button>
                     </div>
                     <p id="task-create-status" class="task-create-status" role="status"></p>

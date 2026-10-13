@@ -94,20 +94,6 @@ export function mountCalendarShell(root) {
                                 <span class="sr-only">List</span>
                             </button>
                         </div>
-                        <button
-                            id="setbtn"
-                            class="calendar-icon-button grid place-items-center"
-                            aria-label="Settings"
-                        >
-                            <i data-i="settings"></i>
-                        </button>
-                        <button
-                            id="fs"
-                            class="calendar-icon-button grid place-items-center"
-                            aria-label="Toggle full screen"
-                        >
-                            <i data-i="maximize-2" data-s="18"></i>
-                        </button>
                     </div>
                 </header>
                 <div
@@ -156,19 +142,19 @@ export function mountCalendarShell(root) {
               <h1 class="sr-only">Tasks</h1>
             </section>
           </div>
-          <button
-            id="addbtn"
-            class="absolute z-10 w-14 h-14 rounded-full bg-accent text-on grid place-items-center"
-            aria-label="Add event"
-            hidden
-          >
-            <i data-i="plus" data-s="26"></i>
-          </button>
-          <nav id="page-pagination" class="page-pagination" aria-label="Covey pages">
-            <button type="button" class="page-pagination-target" data-page="glance" aria-label="Open Glance" aria-current="page"><span></span></button>
-            <button type="button" class="page-pagination-target" data-page="calendar" aria-label="Open Calendar"><span></span></button>
-            <button type="button" class="page-pagination-target" data-page="tasks" aria-label="Open Tasks"><span></span></button>
-          </nav>
+          <div id="surface-controls" class="surface-controls" aria-label="Surface controls">
+            <button id="setbtn" type="button" class="surface-companion surface-settings" aria-label="Settings" title="Settings">
+              <i data-i="settings" data-s="18"></i>
+            </button>
+            <nav id="page-pagination" class="page-pagination" aria-label="Covey pages">
+              <button type="button" class="page-pagination-target" data-page="glance" aria-label="Open Glance" aria-current="page"><span></span></button>
+              <button type="button" class="page-pagination-target" data-page="calendar" aria-label="Open Calendar"><span></span></button>
+              <button type="button" class="page-pagination-target" data-page="tasks" aria-label="Open Tasks"><span></span></button>
+            </nav>
+            <button id="addbtn" type="button" class="surface-companion surface-add" aria-label="Add event">
+              <i data-i="plus" data-s="18"></i><span>Add event</span>
+            </button>
+          </div>
         </div>
     `;
     return root.firstElementChild;

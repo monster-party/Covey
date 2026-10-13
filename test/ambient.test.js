@@ -180,3 +180,9 @@ test("uses a full-pane push over one persistent Glance background", () => {
         /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.ambient-pane\s*\{[^}]*transition:none !important/,
     );
 });
+
+test("keeps equal breathing room above and below the Glance cards", () => {
+    const css = readFileSync(new URL("../style.css", import.meta.url), "utf8");
+    assert.match(css, /\.ambient-glance-main\s*\{[^}]*margin-top:1\.5rem/s);
+    assert.match(css, /\.ambient-glance-footer\s*\{[^}]*margin-top:1\.5rem/s);
+});

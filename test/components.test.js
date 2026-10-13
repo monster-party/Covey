@@ -97,11 +97,8 @@ test("keeps theme controls in settings and exposes settings from Glance", () => 
     assert.doesNotMatch(calendar, /id=["']theme["']/);
     assert.match(settings, /id=["']darkmode["']/);
     assert.match(settings, /id=["']autosw["']/);
-    assert.match(app, /el\("button", "ambient-settings", "Settings"\)/);
-    assert.match(
-        app,
-        /openSettings\.onclick = \(\) => \{\s*setTab = "appearance";\s*setOpen = true;\s*render\(\);/,
-    );
+    assert.match(calendar, /id=["']setbtn["'][^>]*class=["']surface-companion surface-settings/);
+    assert.doesNotMatch(app, /glance-settings|tasks-settings/);
     assert.match(
         app,
         /\$\("covey-pages"\)\.inert =\s*setOpen \|\| sheet \|\| !!detailEvent \|\| taskComposerOpen/,
@@ -121,18 +118,38 @@ test("presents Glance, Calendar, and Tasks as swipeable sibling pages", () => {
     assert.doesNotMatch(calendar, /Open calendar and leave Glance mode/);
     assert.match(app, /const COVEY_PAGES = \["glance", "calendar", "tasks"\]/);
     assert.match(app, /pageViewport\.addEventListener\("pointermove"/);
+    assert.match(
+        app,
+        /pageViewport\.addEventListener\("pointerdown"[\s\S]*?todayWeatherPanelOpen[\s\S]*?return;/,
+    );
+    assert.match(app, /if \(open\) \{[\s\S]*?\$\("surface-controls"\)\.hidden = true/);
+    assert.match(app, /if \(!open\) \{[\s\S]*?surface-controls[\s\S]*?alignPagePagination/);
     assert.match(app, /function alignPagePagination\(\)[\s\S]*?\.ambient-glance-footer/);
-    assert.match(app, /footerCenter[\s\S]*?pagination\.offsetHeight \/ 2/);
-    assert.match(app, /footerCenter[\s\S]*?addButton\.offsetHeight \/ 2/);
+    assert.match(app, /footerCenter[\s\S]*?controls\.offsetHeight \/ 2/);
     assert.doesNotMatch(app, /alignPagePagination\(\)[\s\S]{0,200}activePage !== "glance"/);
-    assert.match(calendar, /<\/div>\s*<button\s+id=["']addbtn["']/);
-    assert.match(app, /page === "tasks" \? "Add task" : "Add event"/);
-    assert.match(app, /activePage === "tasks"\) setTaskComposerOpen\(true\)/);
-    assert.match(styles, /\.page-pagination\s*\{[^}]*backdrop-filter:blur\(22px\)/s);
+    assert.doesNotMatch(calendar, /id=["']page-actions["']/);
+    assert.doesNotMatch(calendar, /id=["']topbar["'][\s\S]*?id=["'](?:addbtn|setbtn)["'][\s\S]*?<\/header>/);
+    assert.match(calendar, /id=["']surface-controls["'][\s\S]*?id=["']setbtn["'][\s\S]*?id=["']page-pagination["'][\s\S]*?id=["']addbtn["']/);
+    assert.match(app, /activePage === "tasks"\) setTaskComposerOpen\(true, \$\("addbtn"\)\)/);
+    assert.match(styles, /\.surface-companion,\.page-pagination\s*\{[^}]*backdrop-filter:blur\(24px\)/s);
+    assert.match(styles, /\.surface-controls\[hidden\]\s*\{\s*display:none/);
     assert.match(styles, /\.page-pagination-target\s*\{[^}]*width:44px[^}]*height:44px/s);
+    assert.match(styles, /\.surface-settings\s*\{[^}]*width:48px/s);
+    assert.match(styles, /\.surface-add\s*\{[^}]*min-width:7\.75rem/s);
     assert.match(styles, /#sheet,#event-detail,#task-composer\s*\{\s*z-index:80/);
     assert.match(styles, /data-active-page=["']tasks["'][^}]*translate3d\(-200%,0,0\)/);
     assert.match(styles, /\.covey-page\s*\{[^}]*background:transparent/s);
     assert.match(styles, /\.covey-glance-page \.ambient-page\s*\{[^}]*background:transparent/s);
     assert.doesNotMatch(styles, /\.covey-tasks-page\s*\{[^}]*radial-gradient/s);
+});
+
+test("opens every modal with a blurred backdrop and shared surface motion", () => {
+    const styles = read("style.css");
+    ["settings", "sheet", "event-detail", "task-composer"].forEach((id) => {
+        assert.match(styles, new RegExp(`#${id}[\\s\\S]*?modal-backdrop-in`));
+    });
+    assert.match(styles, /@keyframes modal-backdrop-in/);
+    assert.match(styles, /@keyframes modal-surface-in/);
+    assert.match(styles, /backdrop-filter:\s*blur\(12px\)/);
+    assert.match(styles, /prefers-reduced-motion[\s\S]*?#task-composer[\s\S]*?animation:none !important/);
 });

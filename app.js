@@ -400,14 +400,15 @@
                 tomorrowEventsLoadingFor = "",
                 tomorrowEventsError = "",
                 setOpen = false,
-                setTab = "calendars";
+                setTab = "calendars",
+                settingsReturnFocus = null;
             let householdTasks = [],
                 tasksStatus = "idle",
                 tasksMessage = "",
                 tasksRequest = null,
                 taskComposerOpen = false,
                 taskAssigneeIds = new Set(),
-                taskBeingEdited = null;
+                taskComposerReturnFocus = null;
             let screenWakeLock = null,
                 wakeLockMessage = "";
             cur.setDate(1);
@@ -686,9 +687,9 @@
                     .finally(() => { tasksRequest = null; });
                 return tasksRequest;
             }
-            function setTaskComposerOpen(open, task = null) {
+            function setTaskComposerOpen(open, returnFocus = null) {
                 taskComposerOpen = open;
-                taskBeingEdited = open ? task : null;
+                if (open) taskComposerReturnFocus = returnFocus || document.activeElement;
                 const composer = $("task-composer");
                 composer.classList.toggle("hidden", !open);
                 composer.classList.toggle("flex", open);
@@ -696,27 +697,21 @@
                     setOpen || sheet || !!detailEvent || taskComposerOpen;
                 if (open) {
                     $("task-composer-form").reset();
-                    taskAssigneeIds = new Set(task?.assigneeIds || []);
+                    taskAssigneeIds = new Set();
                     renderTaskAssigneeOptions();
                     $("task-due-date").min = taskDateKey();
-                    $("task-title").value = task?.title || "";
-                    $("task-due-date").value = task?.dueDate || "";
-                    $("task-due-time").value = task?.dueTime || "";
-                    $("task-due-time").disabled = !task?.dueDate;
-                    $("task-notes").value = task?.notes || "";
-                    $("task-composer-title").textContent = task
-                        ? "Edit task"
-                        : "Add a task";
-                    $("task-create").textContent = task ? "Save changes" : "Add task";
-                    const remove = $("task-remove");
-                    remove.hidden = !task;
-                    remove.disabled = false;
-                    remove.classList.remove("is-confirming");
-                    remove.textContent = "Remove task";
+                    $("task-due-time").disabled = true;
+                    $("task-composer-title").textContent = "Add a task";
+                    $("task-create").textContent = "Add task";
                     $("task-create-status").textContent = "";
                     requestAnimationFrame(() => $("task-title").focus());
                 } else {
-                    $("addbtn").focus();
+                    const target = taskComposerReturnFocus;
+                    taskComposerReturnFocus = null;
+                    requestAnimationFrame(() => {
+                        if (target?.isConnected) target.focus();
+                        else $("addbtn")?.focus();
+                    });
                 }
             }
             function renderTaskAssigneeOptions() {
@@ -762,46 +757,22 @@
                     notes: $("task-notes").value.trim(),
                     assigneeIds: [...taskAssigneeIds],
                 };
-                const editing = taskBeingEdited;
-                if (editing) payload.revision = editing.revision;
                 if (!payload.title) return $("task-title").focus();
                 button.disabled = true;
                 button.setAttribute("aria-busy", "true");
-                $("task-create-status").textContent = editing
-                    ? "Saving changes…"
-                    : "Adding task…";
+                $("task-create-status").textContent = "Adding task…";
                 try {
-                    const response = await fetch(
-                        editing
-                            ? `/api/tasks/${encodeURIComponent(editing.id)}`
-                            : "/api/tasks",
-                        {
-                        method: editing ? "PUT" : "POST",
+                    const response = await fetch("/api/tasks", {
+                        method: "POST",
                         headers: { "Content-Type": "application/json" },
                         body: JSON.stringify(payload),
                     });
                     const result = await response.json().catch(() => ({}));
-                    if (response.status === 409) {
-                        if (result.current) {
-                            householdTasks = mergeTaskResponse(
-                                householdTasks,
-                                result.current,
-                            );
-                            taskBeingEdited = result.current;
-                        }
-                        renderTaskSurfaces();
-                        throw new Error(
-                            "This task changed on another device. Review it and try again.",
-                        );
-                    }
                     if (!response.ok)
-                        throw new Error(
-                            result.error ||
-                                `Could not ${editing ? "update" : "add"} task.`,
-                        );
+                        throw new Error(result.error || "Could not add task.");
                     householdTasks = mergeTaskResponse(householdTasks, result.task);
                     tasksStatus = "ready";
-                    tasksMessage = `${result.task.title} ${editing ? "updated" : "added"}.`;
+                    tasksMessage = `${result.task.title} added.`;
                     renderTaskSurfaces();
                     setTaskComposerOpen(false);
                 } catch (error) {
@@ -810,46 +781,6 @@
                 } finally {
                     button.disabled = false;
                     button.removeAttribute("aria-busy");
-                }
-            }
-            async function removeTask() {
-                const task = taskBeingEdited;
-                const button = $("task-remove");
-                if (!task || button.disabled) return;
-                if (!button.classList.contains("is-confirming")) {
-                    button.classList.add("is-confirming");
-                    button.textContent = "Confirm removal";
-                    $("task-create-status").textContent = "This removes the task for everyone.";
-                    return;
-                }
-                button.disabled = true;
-                $("task-create").disabled = true;
-                $("task-create-status").textContent = "Removing task…";
-                try {
-                    const response = await fetch(
-                        `/api/tasks/${encodeURIComponent(task.id)}?revision=${encodeURIComponent(task.revision)}`,
-                        { method: "DELETE" },
-                    );
-                    const result = await response.json().catch(() => ({}));
-                    if (response.status === 409) {
-                        if (result.current) {
-                            householdTasks = mergeTaskResponse(householdTasks, result.current);
-                            taskBeingEdited = result.current;
-                        }
-                        renderTaskSurfaces();
-                        throw new Error("This task changed on another device. Review it and try again.");
-                    }
-                    if (!response.ok) throw new Error(result.error || "Could not remove task.");
-                    householdTasks = householdTasks.filter((candidate) => candidate.id !== task.id);
-                    tasksStatus = "ready";
-                    tasksMessage = `${task.title} removed.`;
-                    renderTaskSurfaces();
-                    setTaskComposerOpen(false);
-                } catch (error) {
-                    $("task-create-status").textContent = error.message || "Could not remove task.";
-                } finally {
-                    button.disabled = false;
-                    $("task-create").disabled = false;
                 }
             }
             async function setTaskCompleted(task, completed, button) {
@@ -909,14 +840,9 @@
                     ? `Completed${task.completedAt ? " " + new Date(task.completedAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : ""}`
                     : taskDueText(task));
                 copy.append(meta);
-                const edit = el("button", "task-edit-target");
-                edit.type = "button";
-                edit.setAttribute("aria-label", `Edit ${task.title}`);
-                edit.onclick = () => setTaskComposerOpen(true, task);
-                edit.append(copy);
+                row.append(check, copy);
                 const pile = taskFacePile(task);
-                if (pile) edit.append(pile);
-                row.append(check, edit);
+                if (pile) row.append(pile);
                 return row;
             }
             function renderTasksPage() {
@@ -1363,8 +1289,21 @@
             }
 
             const COVEY_PAGES = ["glance", "calendar", "tasks"];
+            function openGlobalSettings(returnFocus = document.activeElement) {
+                settingsReturnFocus = returnFocus;
+                setOpen = true;
+                render();
+            }
+            function restoreSettingsFocus() {
+                const target = settingsReturnFocus;
+                settingsReturnFocus = null;
+                requestAnimationFrame(() => {
+                    if (target?.isConnected) target.focus();
+                    else $("setbtn")?.focus();
+                });
+            }
             function alignPagePagination() {
-                const pagination = $("page-pagination");
+                const controls = $("surface-controls");
                 const footer = $("today-overlay").querySelector(
                     ".ambient-glance-footer",
                 );
@@ -1374,19 +1313,9 @@
                 const footerCenter = footerBounds.top + footerBounds.height / 2;
                 const bottom = Math.max(
                     0,
-                    viewport.bottom - footerCenter - pagination.offsetHeight / 2,
+                    viewport.bottom - footerCenter - controls.offsetHeight / 2,
                 );
-                pagination.style.bottom = `${bottom}px`;
-                const addButton = $("addbtn");
-                if (!addButton.hidden) {
-                    const addBottom = Math.max(
-                        0,
-                        viewport.bottom -
-                            footerCenter -
-                            addButton.offsetHeight / 2,
-                    );
-                    addButton.style.bottom = `${addBottom}px`;
-                }
+                controls.style.bottom = `${bottom}px`;
             }
             function setActivePage(page, { userInitiated = false, focus = false } = {}) {
                 if (!COVEY_PAGES.includes(page)) return;
@@ -1406,12 +1335,10 @@
                     else control.removeAttribute("aria-current");
                 });
                 document.body.classList.toggle("calendar-page-active", page === "calendar");
-                const addButton = $("addbtn");
-                addButton.hidden = page === "glance";
-                addButton.setAttribute(
-                    "aria-label",
-                    page === "tasks" ? "Add task" : "Add event",
-                );
+                const add = $("addbtn");
+                add.hidden = page === "glance";
+                add.setAttribute("aria-label", page === "tasks" ? "Add task" : "Add event");
+                add.querySelector("span").textContent = page === "tasks" ? "Add task" : "Add event";
                 if (userInitiated) {
                     ambientReadyAt = Date.now() + AMBIENT_IDLE_MS;
                     wakeChrome();
@@ -1450,6 +1377,9 @@
                 if (!page || !glance || !forecast) return;
                 todayWeatherTransitioning = true;
                 todayWeatherPanelOpen = open;
+                if (open) {
+                    $("surface-controls").hidden = true;
+                }
                 const source = open ? glance : forecast;
                 const destination = open ? forecast : glance;
                 destination.hidden = false;
@@ -1467,6 +1397,10 @@
                     destination.setAttribute("aria-hidden", "false");
                     page.removeAttribute("data-ambient-navigating");
                     todayWeatherTransitioning = false;
+                    if (!open) {
+                        $("surface-controls").hidden = false;
+                        requestAnimationFrame(alignPagePagination);
+                    }
                     (open ? $("ambient-weather-back") : $("ambient-weather-open"))?.focus();
                 };
                 if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
@@ -1755,6 +1689,7 @@
                 };
                 const page = el("main", "ambient-page");
                 const layerState = ambientLayerState(todayWeatherPanelOpen);
+                $("surface-controls").hidden = todayWeatherPanelOpen;
                 page.dataset.ambientView = layerState.view;
                 page.dataset.ambientTheme = pal;
                 page.dataset.ambientMode = eff();
@@ -1954,17 +1889,7 @@
                               ? `Offline · synced ${timeAgo(lastSyncAt)}`
                               : "Calendar unavailable",
                 ));
-                const footerActions = el("div", "ambient-footer-actions");
-                const openSettings = el("button", "ambient-settings", "Settings");
-                openSettings.type = "button";
-                openSettings.insertAdjacentHTML("afterbegin", ic("settings", 17));
-                openSettings.onclick = () => {
-                    setTab = "appearance";
-                    setOpen = true;
-                    render();
-                };
-                footerActions.append(openSettings);
-                footer.append(sync, footerActions);
+                footer.append(sync);
                 content.append(header, glanceMain, footer);
 
                 const weatherView = el("section", "ambient-forecast-view ambient-pane");
@@ -2013,9 +1938,8 @@
                     stateAction.onclick = weatherState === "error"
                         ? loadTodayWeather
                         : () => {
-                              setOpen = true;
                               setTab = "today";
-                              render();
+                              openGlobalSettings(stateAction);
                               $(todayWeatherEnabled ? "today-weather-location" : "today-weather-enabled")?.focus();
                           };
                     weatherStatePanel.append(stateAction);
@@ -3903,7 +3827,6 @@
                 if (e.target === $("event-detail")) closeEventDetails();
             };
             $("task-composer-form").onsubmit = createTask;
-            $("task-remove").onclick = removeTask;
             $("task-composer-close").onclick = () =>
                 setTaskComposerOpen(false);
             $("task-composer").onclick = (event) => {
@@ -3938,6 +3861,7 @@
                         setOpen = false;
                         calendarFormOpen = false;
                         render();
+                        restoreSettingsFocus();
                     }
                 } else if (sheet) {
                     sheet = false;
@@ -3968,10 +3892,7 @@
                     paint();
                 }
             };
-            $("setbtn").onclick = () => {
-                setOpen = true;
-                render();
-            };
+            $("setbtn").onclick = () => openGlobalSettings($("setbtn"));
             $("keep-screen-awake").onchange = (event) => {
                 keepScreenAwake = event.target.checked;
                 saveSet();
@@ -4048,6 +3969,7 @@
                 personFormOpen = false;
                 renderCalendarPage();
                 render();
+                restoreSettingsFocus();
             };
             $("settings").onclick = (e) => {
                 if (e.target === $("settings")) {
@@ -4056,6 +3978,7 @@
                     personFormOpen = false;
                     renderCalendarPage();
                     render();
+                    restoreSettingsFocus();
                 }
             };
             document.querySelectorAll(".page-pagination-target").forEach((button) => {
@@ -4090,6 +4013,7 @@
                     sheet ||
                     detailEvent ||
                     todayWeatherTransitioning ||
+                    todayWeatherPanelOpen ||
                     event.target.closest("button,input,select,a,[role='button']")
                 )
                     return;
@@ -4150,7 +4074,7 @@
                 suppressPageClick = false;
             }, true);
             $("addbtn").onclick = () => {
-                if (activePage === "tasks") setTaskComposerOpen(true);
+                if (activePage === "tasks") setTaskComposerOpen(true, $("addbtn"));
                 else openSheet(sel);
             };
             $("prev").onclick = () => go(-1);
@@ -4159,9 +4083,10 @@
             $("vm").onclick = () => setView("month");
             $("vw").onclick = () => setView("week");
             $("vl").onclick = () => setView("list");
+            const fullscreenButton = $("settings-fullscreen");
             if (!document.documentElement.requestFullscreen)
-                $("fs").classList.add("hidden");
-            $("fs").onclick = () => {
+                fullscreenButton.hidden = true;
+            fullscreenButton.onclick = () => {
                 try {
                     (document.fullscreenElement
                         ? document.exitFullscreen()
@@ -4170,10 +4095,9 @@
                 } catch (e) {}
             };
             document.addEventListener("fullscreenchange", () => {
-                $("fs").innerHTML = ic(
-                    document.fullscreenElement ? "minimize-2" : "maximize-2",
-                    18,
-                );
+                fullscreenButton.textContent = document.fullscreenElement
+                    ? "Exit full screen"
+                    : "Enter full screen";
             });
             document.addEventListener("visibilitychange", () => {
                 if (document.visibilityState === "visible") {

@@ -196,6 +196,18 @@ export function mountSettingsDialog(root) {
                                 </div>
                             </div>
                         </section>
+                        <section class="mt-7" aria-labelledby="view-display-heading">
+                            <h3 id="view-display-heading" class="settings-section-title">Display</h3>
+                            <div class="settings-group mt-3">
+                                <div class="settings-setting-row view-setting-row">
+                                    <span class="settings-setting-copy">
+                                        <span class="settings-setting-label">Full screen</span>
+                                        <span class="settings-setting-description">Use the entire display for Covey.</span>
+                                    </span>
+                                    <button id="settings-fullscreen" type="button" class="settings-button settings-button-secondary">Enter full screen</button>
+                                </div>
+                            </div>
+                        </section>
                     </div>
                     <div id="tab-today">
                         <section aria-labelledby="ambient-display-heading">
